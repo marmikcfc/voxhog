@@ -16,6 +16,9 @@ out/
 .cache/
 public/dist/
 
+# Project specific
+server/reports/
+
 # Environment variables
 .env
 .env.local
