@@ -11,7 +11,7 @@ export async function GET(
 ) {
     try {
         const authHeader = request.headers.get('Authorization');
-        const id = params.id;
+        const id = await params.id;
 
         if (!authHeader) {
             return NextResponse.json(
@@ -44,32 +44,35 @@ export async function GET(
         if (fs.existsSync(reportPath)) {
             try {
                 const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-                return NextResponse.json(reportData);
+                // Ensure consistent format - if reportData is not an array, wrap it in an array
+                const formattedData = Array.isArray(reportData) ? reportData : [reportData];
+                return NextResponse.json(formattedData);
             } catch (error) {
                 console.error('Error reading local report:', error);
                 // Continue to try fetching from backend if local report can't be read
             }
         }
 
-        // If no local report, try to fetch from the backend
+        // Try to fetch the report from the server's reports directory
         const response = await fetch(`${API_URL}/api/v1/test-runs/${id}/report`, {
             headers: {
                 'Authorization': authHeader
             }
         });
 
-        // If the backend doesn't have a report endpoint or returns an error,
-        // we'll generate a report on the fly
-        if (!response.ok) {
-            // This will trigger the POST endpoint to generate a new report
-            return NextResponse.json(
-                { error: 'No existing report found' },
-                { status: 404 }
-            );
+        if (response.ok) {
+            const data = await response.json();
+            // Ensure consistent format - if data is not an array, wrap it in an array
+            const formattedData = Array.isArray(data) ? data : [data];
+            return NextResponse.json(formattedData);
         }
 
-        const data = await response.json();
-        return NextResponse.json(data);
+        // If the backend doesn't have a report endpoint or returns an error,
+        // we'll generate a report on the fly
+        return NextResponse.json(
+            { error: 'No existing report found' },
+            { status: 404 }
+        );
     } catch (error) {
         console.error('Test run report API error:', error);
         return NextResponse.json(
@@ -128,7 +131,7 @@ export async function POST(
         let testName = 'Unknown Test';
         let testDescription = 'No description available';
 
-        if (testRun.test_case_ids && testRun.test_case_ids.length > 0) {
+        if (testRun.test_case_ids && testRun.test_case_ids.length > 0 && testRun.test_case_ids[0]) {
             const testCaseResponse = await fetch(`${API_URL}/api/v1/test-cases/${testRun.test_case_ids[0]}`, {
                 headers: {
                     'Authorization': authHeader
@@ -139,7 +142,11 @@ export async function POST(
                 const testCase = await testCaseResponse.json();
                 testName = testCase.name;
                 testDescription = testCase.description;
+            } else {
+                console.error(`Failed to fetch test case ${testRun.test_case_ids[0]}`);
             }
+        } else {
+            console.log('No valid test case IDs found in test run:', testRun.test_case_ids);
         }
 
         // Calculate evaluation metrics if available
@@ -153,7 +160,8 @@ export async function POST(
             evaluations = testRun.results.evaluations;
             totalEvaluations = evaluations.length;
 
-            passCount = evaluations.filter((evaluation: any) => evaluation.passed).length;
+            passCount = evaluations.filter((evaluation: any) =>
+                evaluation.result === 'pass' || evaluation.passed).length;
             failCount = totalEvaluations - passCount;
             passRate = totalEvaluations > 0 ? (passCount / totalEvaluations) * 100 : 0;
         }
@@ -196,22 +204,14 @@ export async function POST(
             const reportFilePath = path.join(runDir, 'report.json');
             fs.writeFileSync(reportFilePath, JSON.stringify(report, null, 2));
 
-            // Create a CSV file with the specified format
-            const csvData = [
-                'test_name,test_description,transcript,evaluations,pass_count,fail_count,total_evaluations,pass_rate,recording_url',
-                `"${report.test_name}","${report.test_description}","${JSON.stringify(report.transcript).replace(/"/g, '""')}","${JSON.stringify(report.evaluations).replace(/"/g, '""')}",${report.pass_count},${report.fail_count},${report.total_evaluations},${report.pass_rate},"${report.recording_url || ''}"`
-            ].join('\n');
-
-            const csvFilePath = path.join(runDir, 'report.csv');
-            fs.writeFileSync(csvFilePath, csvData);
-
             console.log(`Report stored at: ${runDir}`);
         } catch (error) {
             console.error('Error storing report locally:', error);
             // Continue even if local storage fails
         }
 
-        return NextResponse.json(report);
+        // Return the report in an array format for consistency
+        return NextResponse.json([report]);
     } catch (error) {
         console.error('Generate report API error:', error);
         return NextResponse.json(

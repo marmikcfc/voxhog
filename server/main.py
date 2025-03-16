@@ -36,13 +36,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# Create reports directory if it doesn't exist
+reports_dir = os.path.join(os.path.dirname(__file__), "reports")
+os.makedirs(reports_dir, exist_ok=True)
+
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production
+    allow_origins=["*"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 # OAuth2 setup (simplified - use a proper auth system in production)
@@ -512,11 +516,26 @@ async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_li
                 scenario=agent_config["scenario"]
             )
         
+        # Filter out any None or empty values from test_case_ids
+        valid_test_case_ids = [test_id for test_id in test_case_ids if test_id]
+        if not valid_test_case_ids:
+            logger.error(f"No valid test case IDs found for test run {run_id}")
+            test_runs[run_id]["status"] = "failed"
+            test_runs[run_id]["error"] = "No valid test case IDs"
+            
+            # Update database
+            db_test_run.status = "failed"
+            db_test_run.error = "No valid test case IDs"
+            db_test_run.completed_at = datetime.now()
+            db.commit()
+            return
+        
         # Create test cases
         test_runner = VoiceTestRunner(agent=agent)
-        for test_id in test_case_ids:
+        for test_id in valid_test_case_ids:
             test_config = test_cases.get(test_id)
             if not test_config:
+                logger.warning(f"Test case {test_id} not found, skipping")
                 continue
                 
             # Create user persona
@@ -574,6 +593,17 @@ async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_li
         db_test_run.results = results
         db.commit()
         
+        # Save report to reports/agent_id/run_id.json
+        try:
+            import os
+            report_dir = os.path.join("reports", agent_id)
+            os.makedirs(report_dir, exist_ok=True)
+            report_path = os.path.join(report_dir, f"{run_id}.json")
+            test_runner.save_report(report_path)
+            logger.info(f"Test report saved to {report_path}")
+        except Exception as report_error:
+            logger.error(f"Error saving test report: {str(report_error)}")
+        
     except Exception as e:
         logger.error(f"Error running test: {str(e)}")
         
@@ -606,8 +636,14 @@ async def create_test_run(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
+    # Filter out any None or empty values from test_case_ids
+    valid_test_case_ids = [test_id for test_id in test_run.test_case_ids if test_id]
+    
+    if not valid_test_case_ids:
+        raise HTTPException(status_code=400, detail="At least one valid test case ID is required")
+    
     # Validate test cases exist and user has access
-    for test_id in test_run.test_case_ids:
+    for test_id in valid_test_case_ids:
         test_case = db.query(TestCaseDB).filter(TestCaseDB.id == test_id).first()
         if not test_case:
             raise HTTPException(status_code=404, detail=f"Test case {test_id} not found")
@@ -625,7 +661,7 @@ async def create_test_run(
         id=run_id,
         user_id=current_user["id"],
         agent_id=test_run.agent_id,
-        test_case_ids=test_run.test_case_ids,
+        test_case_ids=valid_test_case_ids,  # Use the filtered list
         time_limit=test_run.time_limit or 60,
         outbound_call_params=test_run.outbound_call_params,
         status="pending",
@@ -646,7 +682,7 @@ async def create_test_run(
         run_test, 
         run_id=run_id, 
         agent_id=test_run.agent_id, 
-        test_case_ids=test_run.test_case_ids,
+        test_case_ids=valid_test_case_ids,
         time_limit=test_run.time_limit or 60
     )
     
@@ -760,6 +796,40 @@ async def get_test_transcript(
         raise HTTPException(status_code=404, detail="Transcript not found")
     
     return test_runs[run_id]["results"]["transcript"]
+
+@app.get("/api/v1/test-runs/{run_id}/report")
+async def get_test_run_report(
+    run_id: str = Path(...), 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Check if test run exists and user has access
+    db_test_run = db.query(TestRunDB).filter(TestRunDB.id == run_id).first()
+    if not db_test_run:
+        raise HTTPException(status_code=404, detail="Test run not found")
+    
+    # Check if user has access
+    if db_test_run.user_id != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to view this test run")
+    
+    # Check if report file exists
+    import os
+    report_path = os.path.join("reports", db_test_run.agent_id, f"{run_id}.json")
+    if not os.path.exists(report_path):
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    # Read the report file
+    try:
+        import json
+        with open(report_path, 'r') as f:
+            report_data = json.load(f)
+        # Ensure consistent format - if report_data is not an array, wrap it in an array
+        if not isinstance(report_data, list):
+            report_data = [report_data]
+        return report_data
+    except Exception as e:
+        logger.error(f"Error reading report file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error reading report file: {str(e)}")
 
 # API Keys endpoints
 @app.post("/api/v1/keys", response_model=ApiKeyResponse)

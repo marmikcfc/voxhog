@@ -23,8 +23,8 @@ import {
 } from '@/lib/api/voice-agents';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
-
-export default async function VoiceAgentDetailPage({ params }: { params: { id: string } }) {
+import { use } from 'react';
+export default function VoiceAgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { user, isLoading, logout, isAuthenticated } = useAuth();
     const router = useRouter();
     const [agent, setAgent] = useState<VoiceAgent | null>(null);
@@ -32,14 +32,14 @@ export default async function VoiceAgentDetailPage({ params }: { params: { id: s
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [activeTab, setActiveTab] = useState('details');
 
-    const { id } = await params;
+    const { id } = use(params);
 
     // Store the ID in a state variable to avoid direct access to params.id
     const [agentId, setAgentId] = useState<string>('');
 
     // Set the ID once when the component mounts
     useEffect(() => {
-        if (params && id) {
+        if (id) {
             setAgentId(id);
         }
     }, [params]);

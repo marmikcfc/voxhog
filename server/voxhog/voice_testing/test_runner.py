@@ -292,14 +292,18 @@ class VoiceTestRunner:
 
     def save_report(self, report_path: str):
         """
-        Save the test report to a CSV file in the following format:
+        Save the test report to a JSON file in the following format:
         - Test name
         - Test description (scenario prompt)
         - Transcript
-        - Evaluators and their evaluation
+        - Evaluations as an object array with metric name, result, and reason
         - Total pass vs fail in evaluator
         - Recording URL
         """
+        # Ensure the report path has a .json extension
+        if not report_path.endswith('.json'):
+            report_path = report_path.rsplit('.', 1)[0] + '.json'
+            
         logger.debug(f"Saving comprehensive test report to: {report_path}")
         try:
             # Create detailed report rows
@@ -310,19 +314,21 @@ class VoiceTestRunner:
                 # Count pass/fail results
                 pass_count = 0
                 fail_count = 0
-                evaluations_text = []
+                evaluations = []
                 
                 for eval_result in result.get("evaluator_results", []):
-                    eval_text = f"{eval_result.name}: {eval_result.result} - {eval_result.reason}"
-                    evaluations_text.append(eval_text)
+                    # Create evaluation object with the required structure
+                    evaluation = {
+                        "metric_name": eval_result.name,
+                        "result": eval_result.result,  # This should be "pass" or "fail"
+                        "reason": eval_result.reason
+                    }
+                    evaluations.append(evaluation)
                     
                     if eval_result.result == "pass":
                         pass_count += 1
                     elif eval_result.result == "fail":
                         fail_count += 1
-                
-                # Format transcript for readability
-                transcript_text = "\n".join([f"{msg.role}: {msg.content}" for msg in result["transcript"]])
                 
                 # Get test description from scenario
                 test_description = "No description available"
@@ -335,8 +341,8 @@ class VoiceTestRunner:
                 row = {
                     "test_name": result["test_case"],
                     "test_description": test_description,
-                    "transcript": transcript_text,
-                    "evaluations": "\n".join(evaluations_text),
+                    "transcript": result["transcript"],
+                    "evaluations": evaluations,  # Now an array of objects
                     "pass_count": pass_count,
                     "fail_count": fail_count,
                     "total_evaluations": pass_count + fail_count,
@@ -346,9 +352,10 @@ class VoiceTestRunner:
                 
                 rows.append(row)
             
-            # Create DataFrame and save to CSV
-            df = pd.DataFrame(rows)
-            df.to_csv(report_path, index=False)
+            # Save as JSON
+            import json
+            with open(report_path, 'w') as f:
+                json.dump(rows, f, indent=2)
             logger.info(f"Saved comprehensive test report to {report_path}")
             
         except Exception as e:
