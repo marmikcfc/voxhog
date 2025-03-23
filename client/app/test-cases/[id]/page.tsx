@@ -24,8 +24,9 @@ import {
 } from '@/lib/api/test-cases';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
+import { use } from 'react'
 
-export default function TestCaseDetailPage({ params }: { params: { id: string } }) {
+export default function TestCaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { user, isLoading, logout, isAuthenticated } = useAuth();
     const router = useRouter();
     const [testCase, setTestCase] = useState<TestCase | null>(null);
@@ -35,15 +36,11 @@ export default function TestCaseDetailPage({ params }: { params: { id: string } 
     const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
     const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
 
+    const { id } = use(params);
     // Store the ID in a state variable to avoid direct access to params.id
-    const [testCaseId, setTestCaseId] = useState<string>('');
+    const [testCaseId, setTestCaseId] = useState<string>(id);
 
-    // Set the ID once when the component mounts
-    useEffect(() => {
-        if (params && params.id) {
-            setTestCaseId(params.id);
-        }
-    }, [params]);
+
 
     const form = useForm({
         defaultValues: {
@@ -67,6 +64,16 @@ export default function TestCaseDetailPage({ params }: { params: { id: string } 
             fetchMetrics();
         }
     }, [isAuthenticated, testCaseId]);
+
+    useEffect(() => {
+        if (testCase && metrics.length > 0) {
+            // Initialize selected metrics from test case
+            if (testCase.evaluator_metrics) {
+                console.log("Setting selected metrics from test case:", testCase.evaluator_metrics);
+                setSelectedMetrics(testCase.evaluator_metrics);
+            }
+        }
+    }, [testCase, metrics]);
 
     const fetchTestCase = async () => {
         setIsLoadingTestCase(true);
@@ -97,6 +104,7 @@ export default function TestCaseDetailPage({ params }: { params: { id: string } 
         setIsLoadingMetrics(true);
         try {
             const data = await getMetrics();
+            console.log("Fetched metrics:", data);
             setMetrics(data);
         } catch (error) {
             console.error('Failed to fetch metrics:', error);
@@ -106,17 +114,21 @@ export default function TestCaseDetailPage({ params }: { params: { id: string } 
         }
     };
 
-    const toggleMetric = (metricName: string) => {
+    const toggleMetric = (metricId: string) => {
+        console.log("Toggling metric:", metricId);
+        console.log("Current selected metrics:", selectedMetrics);
         setSelectedMetrics(prev =>
-            prev.includes(metricName)
-                ? prev.filter(m => m !== metricName)
-                : [...prev, metricName]
+            prev.includes(metricId)
+                ? prev.filter(m => m !== metricId)
+                : [...prev, metricId]
         );
     };
 
     const onSubmit = async (values: any) => {
         setIsSubmitting(true);
         try {
+            console.log("Submitting with selected metrics:", selectedMetrics);
+
             // Format the data according to the API requirements
             const testCaseData = {
                 name: values.name,
@@ -131,7 +143,9 @@ export default function TestCaseDetailPage({ params }: { params: { id: string } 
                 evaluator_metrics: selectedMetrics.length > 0 ? selectedMetrics : undefined,
             };
 
+            console.log("Submitting test case data:", testCaseData);
             const updatedTestCase = await updateTestCase(testCaseId, testCaseData);
+            console.log("Updated test case:", updatedTestCase);
             setTestCase(updatedTestCase);
             toast.success('Test case updated successfully');
         } catch (error) {
@@ -275,31 +289,40 @@ export default function TestCaseDetailPage({ params }: { params: { id: string } 
                                     </div>
                                 ) : (
                                     <div className="grid gap-2">
-                                        {metrics.map((metric) => (
-                                            <div
-                                                key={metric.id || metric.name}
-                                                className={`flex items-start gap-3 rounded-md border p-3 cursor-pointer ${selectedMetrics.includes(metric.name)
-                                                    ? 'bg-primary/10 border-primary'
-                                                    : ''
-                                                    }`}
-                                                onClick={() => toggleMetric(metric.name)}
-                                            >
-                                                <div className={`mt-1 h-4 w-4 flex-shrink-0 rounded-sm border ${selectedMetrics.includes(metric.name)
-                                                    ? 'bg-primary border-primary'
-                                                    : 'border-gray-300'
-                                                    }`}>
-                                                    {selectedMetrics.includes(metric.name) && (
-                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-white">
-                                                            <polyline points="20 6 9 17 4 12"></polyline>
-                                                        </svg>
-                                                    )}
+                                        {/* Debug information */}
+                                        {(() => {
+                                            console.log("Rendering metrics:", metrics);
+                                            console.log("Selected metrics:", selectedMetrics);
+                                            return null;
+                                        })()}
+                                        {metrics.map((metric) => {
+                                            // Skip metrics without IDs
+                                            if (!metric.id) return null;
+
+                                            const isSelected = selectedMetrics.includes(metric.id);
+
+                                            return (
+                                                <div
+                                                    key={metric.id}
+                                                    className={`flex items-start gap-3 rounded-md border p-3 cursor-pointer ${isSelected ? 'bg-primary/10 border-primary' : ''
+                                                        }`}
+                                                    onClick={() => toggleMetric(metric.id!)}
+                                                >
+                                                    <div className={`mt-1 h-4 w-4 flex-shrink-0 rounded-sm border ${isSelected ? 'bg-primary border-primary' : 'border-gray-300'
+                                                        }`}>
+                                                        {isSelected && (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-white">
+                                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                                            </svg>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-medium text-sm">{metric.name}</p>
+                                                        <p className="text-xs text-gray-500 mt-1 break-words">{metric.prompt}</p>
+                                                    </div>
                                                 </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="font-medium text-sm">{metric.name}</p>
-                                                    <p className="text-xs text-gray-500 mt-1 break-words">{metric.prompt}</p>
-                                                </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>

@@ -16,7 +16,7 @@ import warnings
 warnings.filterwarnings("ignore", message=".*error reading bcrypt version.*")
 
 from sqlalchemy.orm import Session
-from database import AgentDB, TestCaseDB, TestRunDB, get_db, ApiKey, User as DBUser
+from database import AgentDB, TestCaseDB, TestRunDB, get_db, ApiKey, User as DBUser, MetricDB
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
@@ -105,6 +105,7 @@ class ScenarioBase(BaseModel):
     prompt: str
 
 class MetricBase(BaseModel):
+    id: Optional[str] = None
     name: str
     prompt: str
 
@@ -340,6 +341,9 @@ async def create_test_case(
 ):
     test_id = str(uuid.uuid4())
     
+    # Log the evaluator_metrics before creating
+    logger.info(f"Creating test case with evaluator_metrics: {test_case.evaluator_metrics}")
+    
     # Create database record
     db_test_case = TestCaseDB(
         id=test_id,
@@ -358,6 +362,9 @@ async def create_test_case(
     test_data["id"] = test_id
     test_data["created_at"] = datetime.now()
     test_cases[test_id] = test_data
+    
+    # Log the created test case
+    logger.info(f"Created test case: {db_test_case.to_dict()}")
     
     return db_test_case.to_dict()
 
@@ -418,6 +425,11 @@ async def update_test_case(
     db_test_case.name = test_case.name
     db_test_case.user_persona = test_case.user_persona.dict()
     db_test_case.scenario = test_case.scenario.dict()
+    
+    # Log the evaluator_metrics before updating
+    logger.info(f"Updating test case {test_id} with evaluator_metrics: {test_case.evaluator_metrics}")
+    
+    # Ensure evaluator_metrics is properly set
     db_test_case.evaluator_metrics = test_case.evaluator_metrics
     db.commit()
     db.refresh(db_test_case)
@@ -427,6 +439,9 @@ async def update_test_case(
     test_data["id"] = test_id
     test_data["created_at"] = test_cases[test_id]["created_at"]
     test_cases[test_id] = test_data
+    
+    # Log the updated test case
+    logger.info(f"Updated test case: {db_test_case.to_dict()}")
     
     return db_test_case.to_dict()
 
@@ -459,16 +474,39 @@ async def delete_test_case(
 
 # Metrics endpoints
 @app.post("/api/v1/metrics", response_model=MetricBase)
-async def create_metric(metric: MetricBase, current_user: User = Depends(get_current_user)):
+async def create_metric(metric: MetricBase, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     metric_id = str(uuid.uuid4())
+    
+    # Create database record
+    db_metric = MetricDB(
+        id=metric_id,
+        name=metric.name,
+        prompt=metric.prompt,
+        user_id=current_user["id"]
+    )
+    db.add(db_metric)
+    db.commit()
+    db.refresh(db_metric)
+    
+    # Save to in-memory dictionary
     metric_data = metric.dict()
     metric_data["id"] = metric_id
     metrics[metric_id] = metric_data
-    return metric_data
+    
+    return db_metric.to_dict()
 
 @app.get("/api/v1/metrics", response_model=List[MetricBase])
-async def list_metrics(current_user: User = Depends(get_current_user)):
-    return list(metrics.values())
+async def list_metrics(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get metrics from database
+    logger.info(f"Fetching metrics for user: {current_user['username']}")
+    db_metrics = db.query(MetricDB).all()
+    logger.info(f"Found {len(db_metrics)} metrics in database")
+    
+    # Log the metrics for debugging
+    metrics_list = [metric.to_dict() for metric in db_metrics]
+    logger.info(f"Returning metrics: {metrics_list}")
+    
+    return metrics_list
 
 # Test run endpoints
 async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_limit: int):
@@ -534,6 +572,7 @@ async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_li
         test_runner = VoiceTestRunner(agent=agent)
         for test_id in valid_test_case_ids:
             test_config = test_cases.get(test_id)
+            logger.info(f"Test config: {test_config}")
             if not test_config:
                 logger.warning(f"Test case {test_id} not found, skipping")
                 continue
@@ -552,14 +591,20 @@ async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_li
             
             # Create evaluator if metrics specified
             evaluator = None
+            logger.info(f"Test config evaluator_metrics: {test_config.get('evaluator_metrics')}")
             if test_config.get("evaluator_metrics"):
                 evaluator = VoiceAgentEvaluator(model="gpt-4o-mini")
+                logger.info(f"Available metrics: {list(metrics.keys())}")
                 for metric_id in test_config["evaluator_metrics"]:
+                    logger.info(f"Looking for metric with ID: {metric_id}")
                     if metric_id in metrics:
+                        logger.info(f"Adding metric: {metrics[metric_id]['name']}")
                         evaluator.add_metric(VoiceAgentMetric(
                             name=metrics[metric_id]["name"],
                             prompt=metrics[metric_id]["prompt"]
                         ))
+                    else:
+                        logger.warning(f"Metric with ID {metric_id} not found in metrics dictionary")
             
             # Create test case
             test_case = TestCase(
@@ -1073,9 +1118,17 @@ async def load_data_from_db():
         }
     logger.info(f"Loaded {len(test_cases)} test cases from database")
     
-    # Load metrics (if you have a metrics table, otherwise implement as needed)
-    # This is a placeholder - you may need to adjust based on how metrics are stored
-    # For example, you might have predefined metrics or store them in a separate table
+    # Load metrics from database
+    db_metrics = db.query(MetricDB).all()
+    for metric in db_metrics:
+        metrics[metric.id] = {
+            "id": metric.id,
+            "name": metric.name,
+            "prompt": metric.prompt,
+            "user_id": metric.user_id,
+            "created_at": metric.created_at
+        }
+    logger.info(f"Loaded {len(metrics)} metrics from database")
     
     db.close()
     logger.info("Data loading complete")

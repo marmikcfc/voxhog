@@ -52,27 +52,43 @@ export default function NewTestCasePage() {
     const fetchMetrics = async () => {
         setIsLoadingMetrics(true);
         try {
+            console.log("Fetching metrics...");
             const data = await getMetrics();
+            console.log("Fetched metrics:", data);
+
+            // Check if we actually received metrics
+            if (!data || data.length === 0) {
+                console.warn("No metrics returned from the server");
+                toast.warning("No metrics available. You may need to create some first.");
+            } else {
+                console.log("Received metrics:", data.length);
+                console.log("First metric:", data[0]);
+            }
+
             setMetrics(data);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to fetch metrics:', error);
-            toast.error('Failed to fetch metrics');
+            toast.error('Failed to fetch metrics: ' + (error.message || 'Unknown error'));
         } finally {
             setIsLoadingMetrics(false);
         }
     };
 
-    const toggleMetric = (metricName: string) => {
+    const toggleMetric = (metricId: string) => {
+        console.log("Toggling metric:", metricId);
+        console.log("Current selected metrics:", selectedMetrics);
         setSelectedMetrics(prev =>
-            prev.includes(metricName)
-                ? prev.filter(m => m !== metricName)
-                : [...prev, metricName]
+            prev.includes(metricId)
+                ? prev.filter(m => m !== metricId)
+                : [...prev, metricId]
         );
     };
 
     const onSubmit = async (values: any) => {
         setIsSubmitting(true);
         try {
+            console.log("Submitting with selected metrics:", selectedMetrics);
+
             // Format the data according to the API requirements
             const testCaseData = {
                 name: values.name,
@@ -87,6 +103,7 @@ export default function NewTestCasePage() {
                 evaluator_metrics: selectedMetrics.length > 0 ? selectedMetrics : undefined,
             };
 
+            console.log("Submitting test case data:", testCaseData);
             await createTestCase(testCaseData);
             toast.success('Test case created successfully');
             router.push('/test-cases');
@@ -231,31 +248,40 @@ export default function NewTestCasePage() {
                                     </div>
                                 ) : (
                                     <div className="grid gap-2">
-                                        {metrics.map((metric) => (
-                                            <div
-                                                key={metric.id || metric.name}
-                                                className={`flex items-start gap-3 rounded-md border p-3 cursor-pointer ${selectedMetrics.includes(metric.name)
-                                                    ? 'bg-primary/10 border-primary'
-                                                    : ''
-                                                    }`}
-                                                onClick={() => toggleMetric(metric.name)}
-                                            >
-                                                <div className={`mt-1 h-4 w-4 flex-shrink-0 rounded-sm border ${selectedMetrics.includes(metric.name)
-                                                    ? 'bg-primary border-primary'
-                                                    : 'border-gray-300'
-                                                    }`}>
-                                                    {selectedMetrics.includes(metric.name) && (
-                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-white">
-                                                            <polyline points="20 6 9 17 4 12"></polyline>
-                                                        </svg>
-                                                    )}
+                                        {/* Debug information */}
+                                        {(() => {
+                                            console.log("Rendering metrics:", metrics);
+                                            console.log("Selected metrics:", selectedMetrics);
+                                            return null;
+                                        })()}
+                                        {metrics.map((metric) => {
+                                            // Skip metrics without IDs
+                                            if (!metric.id) return null;
+
+                                            const isSelected = selectedMetrics.includes(metric.id);
+
+                                            return (
+                                                <div
+                                                    key={metric.id}
+                                                    className={`flex items-start gap-3 rounded-md border p-3 cursor-pointer ${isSelected ? 'bg-primary/10 border-primary' : ''
+                                                        }`}
+                                                    onClick={() => toggleMetric(metric.id!)}
+                                                >
+                                                    <div className={`mt-1 h-4 w-4 flex-shrink-0 rounded-sm border ${isSelected ? 'bg-primary border-primary' : 'border-gray-300'
+                                                        }`}>
+                                                        {isSelected && (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-white">
+                                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                                            </svg>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-medium text-sm">{metric.name}</p>
+                                                        <p className="text-xs text-gray-500 mt-1 break-words">{metric.prompt}</p>
+                                                    </div>
                                                 </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="font-medium text-sm">{metric.name}</p>
-                                                    <p className="text-xs text-gray-500 mt-1 break-words">{metric.prompt}</p>
-                                                </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>

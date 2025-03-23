@@ -42,11 +42,16 @@ class VoiceAgentEvaluator:
         Evaluate the voice conversation across all metrics in a single API call.
         Returns a list of VoiceAgentEvaluation objects.
         """
-        logger.debug(f"Number of metrics to evaluate: {len(self.metrics)}")
+        logger.info(f"Number of metrics to evaluate: {len(self.metrics)}")
         
         try:
+            if len(self.metrics) == 0:
+                logger.warning("No metrics to evaluate, returning empty list")
+                return VoiceAgentEvaluationResults(evaluations=[])
+                
             metrics_prompt = "\n".join([f"Metric {i+1}: {m.name}\n{m.prompt}" for i, m in enumerate(self.metrics)])
-            logger.debug(f"Generated metrics prompt with {len(self.metrics)} metrics")
+            logger.info(f"Generated metrics prompt with {len(self.metrics)} metrics")
+            logger.debug(f"Metrics prompt: {metrics_prompt}")
             
             messages = [
                 {"role": "system", "content": "You are an expert in evaluating transcripts between customers and agents. "

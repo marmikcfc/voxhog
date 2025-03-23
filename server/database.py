@@ -44,6 +44,7 @@ class User(Base):
     agents = relationship("AgentDB", back_populates="user")
     test_cases = relationship("TestCaseDB", back_populates="user")
     test_runs = relationship("TestRunDB", back_populates="user")
+    metrics = relationship("MetricDB", back_populates="user")
     
     def to_dict(self):
         return {
@@ -109,6 +110,27 @@ class TestCaseDB(Base):
             "scenario": self.scenario,
             "evaluator_metrics": self.evaluator_metrics,
             "is_shared": self.is_shared,
+            "created_at": self.created_at
+        }
+
+class MetricDB(Base):
+    __tablename__ = "metrics"
+    
+    id = Column(String, primary_key=True)
+    name = Column(String)
+    prompt = Column(Text)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    # Relationships
+    user = relationship("User", back_populates="metrics")
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "prompt": self.prompt,
+            "user_id": self.user_id,
             "created_at": self.created_at
         }
 
