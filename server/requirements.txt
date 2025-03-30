@@ -18,3 +18,5 @@ openai>=1.59.9
 starlette>=0.41.3
 aiohttp>=3.11.12
 websockets>=13.1
+pandas>=2.2.3
+requests>=2.32.3
