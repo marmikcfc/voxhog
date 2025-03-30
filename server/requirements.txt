@@ -1,5 +1,4 @@
 fastapi>=0.115.5
-pipecat-ai>=0.0.57
 uvicorn>=0.30.1
 pydantic>=2.10.6
 pydantic-settings>=2.8.1
@@ -20,3 +19,4 @@ aiohttp>=3.11.12
 websockets>=13.1
 pandas>=2.2.3
 requests>=2.32.3
+pipecat-ai[cartesia,openai,silero,deepgram]==0.0.57
