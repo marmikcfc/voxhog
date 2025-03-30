@@ -5,10 +5,12 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const authHeader = request.headers.get('Authorization');
+        const paramsData = await params;
+        const id = paramsData.id;
 
         if (!authHeader) {
             return NextResponse.json(
@@ -18,7 +20,7 @@ export async function GET(
         }
 
         // Forward the request to the backend
-        const response = await fetch(`${API_URL}/api/v1/test-runs/${params.id}`, {
+        const response = await fetch(`${API_URL}/api/v1/test-runs/${id}`, {
             headers: {
                 'Authorization': authHeader
             }
@@ -45,10 +47,12 @@ export async function GET(
 
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const authHeader = request.headers.get('Authorization');
+        const paramsData = await params;
+        const id = paramsData.id;
 
         if (!authHeader) {
             return NextResponse.json(
@@ -58,7 +62,7 @@ export async function DELETE(
         }
 
         // Forward the request to the backend
-        const response = await fetch(`${API_URL}/api/v1/test-runs/${params.id}`, {
+        const response = await fetch(`${API_URL}/api/v1/test-runs/${id}`, {
             method: 'DELETE',
             headers: {
                 'Authorization': authHeader

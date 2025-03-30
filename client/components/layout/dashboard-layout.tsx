@@ -14,7 +14,7 @@ export function DashboardLayout({
     onLogout,
 }: DashboardLayoutProps) {
     return (
-        <div className="grid min-h-screen w-full lg:grid-cols-[280px_1fr]">
+        <div className="grid min-h-screen w-full lg:grid-cols-[238px_1fr]">
             <Sidebar username={username} onLogout={onLogout} />
             <div className="flex flex-col">
                 <Navbar username={username} onLogout={onLogout} />

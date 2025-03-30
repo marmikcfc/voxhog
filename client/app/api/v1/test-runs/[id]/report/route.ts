@@ -7,11 +7,12 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const authHeader = request.headers.get('Authorization');
-        const id = await params.id;
+        const paramsData = await params;
+        const id = paramsData.id;
 
         if (!authHeader) {
             return NextResponse.json(

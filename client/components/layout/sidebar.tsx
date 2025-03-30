@@ -11,19 +11,19 @@ interface SidebarProps {
 export function Sidebar({ username, onLogout }: SidebarProps) {
     return (
         <div className="hidden border-r bg-gray-100/40 dark:bg-gray-800/40 lg:block">
-            <div className="flex h-full max-h-screen flex-col gap-2">
+            <div className="flex flex-col h-screen sticky top-0">
                 <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
                     <Link href="/" className="flex items-center gap-2 font-semibold">
                         <span className="text-lg font-bold">VoxHog</span>
                     </Link>
                 </div>
-                <div className="flex-1 overflow-auto py-2">
+                <div className="flex-1 overflow-y-auto py-2">
                     <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
                         <Link
-                            href="/dashboard"
+                            href="/evaluations"
                             className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-700"
                         >
-                            Dashboard
+                            Evaluations
                         </Link>
                         <Link
                             href="/agents"
@@ -36,12 +36,6 @@ export function Sidebar({ username, onLogout }: SidebarProps) {
                             className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-700"
                         >
                             Test Cases
-                        </Link>
-                        <Link
-                            href="/evaluations"
-                            className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-700"
-                        >
-                            Evaluations
                         </Link>
                         <Link
                             href="/test-cases/metrics"
@@ -63,18 +57,23 @@ export function Sidebar({ username, onLogout }: SidebarProps) {
                         </Link>
                     </nav>
                 </div>
-                <div className="mt-auto border-t p-4">
+                <div className="border-t w-full bg-white dark:bg-gray-900 py-4 px-4">
                     <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                            <Avatar className="h-9 w-9">
+                            <Avatar className="h-10 w-10 border border-gray-200">
                                 <AvatarImage alt={username} />
-                                <AvatarFallback>{username.charAt(0)}</AvatarFallback>
+                                <AvatarFallback>{username.charAt(0).toLowerCase()}</AvatarFallback>
                             </Avatar>
                             <div className="grid gap-0.5">
-                                <div className="font-medium">{username}</div>
+                                <div className="font-medium text-sm truncate max-w-[120px]">{username}</div>
                             </div>
                         </div>
-                        <Button variant="outline" size="sm" onClick={onLogout}>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={onLogout}
+                            className="font-medium border border-gray-300"
+                        >
                             Logout
                         </Button>
                     </div>
@@ -109,7 +108,7 @@ export function MobileSidebar({ username, onLogout }: SidebarProps) {
                 </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-[250px] sm:w-[300px]">
-                <div className="flex h-full flex-col gap-2">
+                <div className="flex h-full flex-col">
                     <div className="flex h-14 items-center border-b px-4">
                         <Link href="/" className="flex items-center gap-2 font-semibold">
                             <span className="text-lg font-bold">VoxHog</span>
@@ -118,10 +117,10 @@ export function MobileSidebar({ username, onLogout }: SidebarProps) {
                     <div className="flex-1 overflow-auto py-2">
                         <nav className="grid items-start px-2 text-sm font-medium">
                             <Link
-                                href="/dashboard"
+                                href="/evaluations"
                                 className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-700"
                             >
-                                Dashboard
+                                Evaluations
                             </Link>
                             <Link
                                 href="/agents"
@@ -134,12 +133,6 @@ export function MobileSidebar({ username, onLogout }: SidebarProps) {
                                 className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-700"
                             >
                                 Test Cases
-                            </Link>
-                            <Link
-                                href="/evaluations"
-                                className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-700"
-                            >
-                                Evaluations
                             </Link>
                             <Link
                                 href="/test-cases/metrics"
@@ -161,18 +154,23 @@ export function MobileSidebar({ username, onLogout }: SidebarProps) {
                             </Link>
                         </nav>
                     </div>
-                    <div className="mt-auto border-t p-4">
+                    <div className="border-t w-full bg-white dark:bg-gray-900 py-4 px-4">
                         <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
-                                <Avatar className="h-9 w-9">
+                                <Avatar className="h-10 w-10 border border-gray-200">
                                     <AvatarImage alt={username} />
-                                    <AvatarFallback>{username.charAt(0)}</AvatarFallback>
+                                    <AvatarFallback>{username.charAt(0).toLowerCase()}</AvatarFallback>
                                 </Avatar>
                                 <div className="grid gap-0.5">
-                                    <div className="font-medium">{username}</div>
+                                    <div className="font-medium text-sm truncate max-w-[120px]">{username}</div>
                                 </div>
                             </div>
-                            <Button variant="outline" size="sm" onClick={onLogout}>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={onLogout}
+                                className="font-medium border border-gray-300"
+                            >
                                 Logout
                             </Button>
                         </div>

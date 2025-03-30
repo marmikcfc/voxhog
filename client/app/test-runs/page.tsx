@@ -116,52 +116,64 @@ export default function TestRunsPage() {
                         </Button>
                     </div>
                 ) : (
-                    <div className="space-y-4">
-                        {testRuns.map((testRun) => (
-                            <div
-                                key={testRun.id}
-                                className="rounded-lg border bg-card p-6 shadow-sm"
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <h3 className="text-lg font-medium">Test Run {testRun.id.substring(0, 8)}</h3>
+                    <div className="rounded-lg border shadow-sm overflow-hidden">
+                        <table className="w-full">
+                            <thead>
+                                <tr className="border-b bg-muted/50">
+                                    <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Test Run ID</th>
+                                    <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Status</th>
+                                    <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Agent ID</th>
+                                    <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Started</th>
+                                    <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Completed</th>
+                                    <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Test Cases</th>
+                                    <th className="text-right py-3 px-4 font-medium text-xs uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {testRuns.map((testRun) => (
+                                    <tr key={testRun.id} className="border-b hover:bg-muted/50 transition-colors">
+                                        <td className="py-3 px-4 text-sm">
+                                            <div className="flex items-center gap-2">
+                                                Test Run {testRun.id.substring(0, 8)}
+                                            </div>
+                                        </td>
+                                        <td className="py-3 px-4 text-sm">
                                             <span className={`rounded-full px-2 py-1 text-xs font-medium ${getStatusBadgeClass(testRun.status)}`}>
                                                 {testRun.status}
                                             </span>
-                                        </div>
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            Agent ID: {testRun.agent_id}
-                                        </p>
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            Started: {new Date(testRun.started_at).toLocaleString()}
-                                        </p>
-                                        {testRun.completed_at && (
-                                            <p className="mt-1 text-sm text-gray-500">
-                                                Completed: {new Date(testRun.completed_at).toLocaleString()}
-                                            </p>
-                                        )}
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            Test Cases: {testRun.test_case_ids.length}
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-col gap-2">
-                                        <Button variant="outline" size="sm" asChild>
-                                            <Link href={`/test-runs/${testRun.id}`}>View Details</Link>
-                                        </Button>
-                                        {(testRun.status === 'pending' || testRun.status === 'running') && (
-                                            <Button
-                                                variant="destructive"
-                                                size="sm"
-                                                onClick={() => handleCancel(testRun.id)}
-                                            >
-                                                Cancel
-                                            </Button>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
+                                        </td>
+                                        <td className="py-3 px-4 text-sm">
+                                            <span className="font-mono text-xs">{testRun.agent_id}</span>
+                                        </td>
+                                        <td className="py-3 px-4 text-sm">
+                                            {new Date(testRun.started_at).toLocaleString()}
+                                        </td>
+                                        <td className="py-3 px-4 text-sm">
+                                            {testRun.completed_at ? new Date(testRun.completed_at).toLocaleString() : '-'}
+                                        </td>
+                                        <td className="py-3 px-4 text-sm">
+                                            {testRun.test_case_ids.length}
+                                        </td>
+                                        <td className="py-3 px-4 text-sm text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <Button variant="outline" size="sm" asChild>
+                                                    <Link href={`/test-runs/${testRun.id}`}>View Details</Link>
+                                                </Button>
+                                                {(testRun.status === 'pending' || testRun.status === 'running') && (
+                                                    <Button
+                                                        variant="destructive"
+                                                        size="sm"
+                                                        onClick={() => handleCancel(testRun.id)}
+                                                    >
+                                                        Cancel
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </div>

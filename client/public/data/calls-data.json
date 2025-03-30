@@ -1,0 +1,67 @@
+[
+    {
+        "id": "c3c60707-7a07-4380-a845-a246152d81df",
+        "ttfw": "825ms",
+        "p50": "535ms",
+        "p90": "1415ms",
+        "p95": "1415ms",
+        "agentRushingIncident": 0,
+        "evalResults": "1/1",
+        "createdAt": "about 4 hours ago",
+        "llm": "GPT-4",
+        "voiceProvider": "ElevenLabs",
+        "voiceName": "Mary"
+    },
+    {
+        "id": "d7a2381f-32dc-43a9-8b67-7138c272c65d",
+        "ttfw": "625ms",
+        "p50": "680ms",
+        "p90": "2395ms",
+        "p95": "2395ms",
+        "agentRushingIncident": 0,
+        "evalResults": "1/1",
+        "createdAt": "about 4 hours ago",
+        "llm": "GPT-4",
+        "voiceProvider": "ElevenLabs",
+        "voiceName": "Mary"
+    },
+    {
+        "id": "be48dda2-0b9b-4daf-8b14-9fc37e45fba8",
+        "ttfw": "700ms",
+        "p50": "700ms",
+        "p90": "700ms",
+        "p95": "700ms",
+        "agentRushingIncident": 0,
+        "evalResults": "1/1",
+        "createdAt": "about 4 hours ago",
+        "llm": "GPT-4",
+        "voiceProvider": "ElevenLabs",
+        "voiceName": "Mary"
+    },
+    {
+        "id": "f5a2381f-32ab-43a9-8b67-7138c272c65d",
+        "ttfw": "550ms",
+        "p50": "610ms",
+        "p90": "1850ms",
+        "p95": "2100ms",
+        "agentRushingIncident": 1,
+        "evalResults": "0/1",
+        "createdAt": "about 6 hours ago",
+        "llm": "Claude-3",
+        "voiceProvider": "ElevenLabs",
+        "voiceName": "Rachel"
+    },
+    {
+        "id": "a1b2c3d4-5e6f-7890-abcd-ef1234567890",
+        "ttfw": "680ms",
+        "p50": "720ms",
+        "p90": "1680ms",
+        "p95": "2250ms",
+        "agentRushingIncident": 0,
+        "evalResults": "1/1",
+        "createdAt": "about 1 day ago",
+        "llm": "GPT-4",
+        "voiceProvider": "Azure",
+        "voiceName": "Sarah"
+    }
+]

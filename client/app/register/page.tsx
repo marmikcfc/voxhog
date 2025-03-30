@@ -11,17 +11,16 @@ export default function Register() {
 
     useEffect(() => {
         if (isAuthenticated) {
-            router.push('/dashboard');
+            router.push('/evaluations');
         }
     }, [isAuthenticated, router]);
 
     const handleRegister = async (username: string, email: string, password: string) => {
         try {
             await register(username, email, password);
-            // Redirect to login page after successful registration
-            router.push('/');
+            router.push('/evaluations');
         } catch (error) {
-            console.error('Registration error:', error);
+            console.error('Registration failed:', error);
         }
     };
 
