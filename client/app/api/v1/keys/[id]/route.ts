@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 // Replace with your backend URL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://voxhog.onrender.com';
 
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const authHeader = request.headers.get('Authorization');
+
+        const paramsData = await params;
+        const id = paramsData.id;
 
         if (!authHeader) {
             return NextResponse.json(
@@ -18,7 +21,7 @@ export async function DELETE(
         }
 
         // Forward the request to the backend
-        const response = await fetch(`${API_URL}/api/v1/keys/${params.id}`, {
+        const response = await fetch(`${API_URL}/api/v1/keys/${id}`, {
             method: 'DELETE',
             headers: {
                 'Authorization': authHeader
