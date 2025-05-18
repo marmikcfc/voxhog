@@ -2,6 +2,7 @@ import os
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 from pathlib import Path
+from typing import List, Dict, Tuple
 
 # Load environment variables
 load_dotenv()
@@ -32,6 +33,14 @@ class Settings(BaseSettings):
     # Credentials storage
     credentials_dir: Path = Path("./credentials")
     
+    # API Keys - consider moving to a more secure storage or env variables
+    deepgram_api_key: str = "your-deepgram-api-key"
+    elevenlabs_api_key: str = "your-elevenlabs-api-key"
+    cartesia_api_key: str = "your-cartesia-api-key"
+    
+    # Twilio settings (if using Twilio for phone capabilities)
+    base_url: str = "http://localhost:8000" # Base URL of your FastAPI app for webhooks
+    
     # Add this method to the Settings class
     def ensure_credentials_dir(self):
         """Ensure the credentials directory exists"""
@@ -41,4 +50,37 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Ensure credentials directory exists
-settings.ensure_credentials_dir() 
+settings.ensure_credentials_dir()
+
+# Supported languages and accents configuration
+SUPPORTED_LANGUAGES_ACCENTS: Dict[str, List[str]] = {
+    "Hindi": ["Bihari", "Bhojpuri", "Standard", "Haryanvi"],
+    "English": ["Indian", "American", "British"],
+    "Filipino": ["Standard", "Ilocano", "Cebuano"] # Assuming 'Filipino' as language, others as accents
+}
+
+# Mapping for ElevenLabs voice IDs
+# IMPORTANT: Replace these with actual valid ElevenLabs voice IDs for your account and desired voices.
+ELEVENLABS_VOICE_MAPPING: Dict[Tuple[str, str], str] = {
+    # English
+    ("English", "American"): "uYXf8XasLslADfZ2MB4u", # e.g., a typical American voice
+    ("English", "British"): "G17SuINrv2H9FC6nvetn", # Existing "Female" - verify accent, maybe Rachel from EL
+    ("English", "Indian"): "pzxut4zZz4GImZNlqQ3H",   # e.g., a voice with an Indian English accent
+
+    # Hindi - Note: ElevenLabs has multilingual models. You might need to use a specific model that supports Hindi
+    # and then select a voice ID that speaks Hindi with the desired accent.
+    # The voice IDs below are placeholders.
+    ("Hindi", "Standard"): "m5qndnI7u4OAdXhH0Mr5",
+    ("Hindi", "Bihari"): "3Th96YoTP1kEKxJroYo1",
+    ("Hindi", "Bhojpuri"): "7NsaqHdLuKNFvEfjpUno",
+    ("Hindi", "Haryanvi"): "v984ziaDjt5EKuv3UFRU",
+
+    # Filipino Languages - Similar to Hindi, check ElevenLabs model and voice capabilities.
+    # These might require specific voice IDs from a multilingual model that supports these languages/accents.
+    ("Filipino", "Standard"): "7tWz9X5zl45gE6bg2uiN", # (e.g. Tagalog)
+    ("Filipino", "Ilocano"): "210zNy7juwIO3DylDyJk",
+    ("Filipino", "Cebuano"): "RKj1DIXprh8zdvjllfhJ",
+}
+
+# Default voice if a specific mapping is not found
+DEFAULT_ELEVENLABS_VOICE_ID: str = "2zRM7PkgwBPiau2jvVXc" # Default to the existing Female voice 

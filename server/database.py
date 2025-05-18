@@ -45,6 +45,7 @@ class User(Base):
     test_cases = relationship("TestCaseDB", back_populates="user")
     test_runs = relationship("TestRunDB", back_populates="user")
     metrics = relationship("MetricDB", back_populates="user")
+    evaluations = relationship("EvaluationDB", back_populates="user")
     
     def to_dict(self):
         return {
@@ -66,6 +67,8 @@ class AgentDB(Base):
     direction = Column(String)
     persona = Column(Text, nullable=True)
     scenario = Column(Text, nullable=True)
+    language = Column(String, nullable=True)
+    accent = Column(String, nullable=True)
     user_id = Column(String, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.now)
     
@@ -82,6 +85,8 @@ class AgentDB(Base):
             "direction": self.direction,
             "persona": self.persona,
             "scenario": self.scenario,
+            "language": self.language,
+            "accent": self.accent,
             "user_id": self.user_id,
             "created_at": self.created_at
         }
@@ -166,6 +171,37 @@ class TestRunDB(Base):
             "completed_at": self.completed_at,
             "results": self.results,
             "error": self.error
+        }
+
+class EvaluationDB(Base):
+    __tablename__ = "evaluations"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"))
+    recording_filename = Column(String)
+    metric_ids = Column(JSON)  # List of metric IDs (strings)
+    status = Column(String, default="pending")  # e.g., "pending", "running", "completed", "failed"
+    transcript = Column(Text, nullable=True)
+    results = Column(JSON, nullable=True)  # Stores evaluation scores/details per metric
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow) # Use datetime.utcnow for consistency
+    completed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    user = relationship("User", back_populates="evaluations")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "recording_filename": self.recording_filename,
+            "metric_ids": self.metric_ids,
+            "status": self.status,
+            "transcript": self.transcript,
+            "results": self.results,
+            "error_message": self.error_message,
+            "created_at": self.created_at,
+            "completed_at": self.completed_at
         }
 
 # Create tables

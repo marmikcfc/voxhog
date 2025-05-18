@@ -16,6 +16,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams, FastAPIWebsocketTransport
@@ -24,6 +25,9 @@ from openai.types.chat import ChatCompletionToolParam
 from dataclasses import dataclass
 from typing import Literal, Optional, Dict
 from openai.types.chat import ChatCompletionToolParam
+
+# Import config values
+from config import SUPPORTED_LANGUAGES_ACCENTS, ELEVENLABS_VOICE_MAPPING, DEFAULT_ELEVENLABS_VOICE_ID
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -63,7 +67,9 @@ class TranscriptHandler:
         return messages
 
 class VoiceAgent:
-    def __init__(self, agent_id: str, agent_type: str, connection_details: dict, direction: Direction = None, voice_agent_api_args: dict = None):
+    def __init__(self, agent_id: str, agent_type: str, connection_details: dict, 
+                 direction: Direction = None, voice_agent_api_args: dict = None,
+                 language: Optional[str] = None, accent: Optional[str] = None):
         """
         Initialize a voice agent for testing.
         
@@ -75,8 +81,11 @@ class VoiceAgent:
                 - phone_number: The phone number to use for outbound calls
                 - endpoint: The WebSocket endpoint for the agent
             direction (Direction): Call direction (INBOUND or OUTBOUND)
+            voice_agent_api_args (dict): Arguments for voice agent API.
+            language (Optional[str]): Desired language for TTS.
+            accent (Optional[str]): Desired accent for TTS.
         """
-        logger.info(f"Initializing VoiceAgent with ID: {agent_id}")
+        logger.info(f"Initializing VoiceAgent with ID: {agent_id}, Language: {language}, Accent: {accent}")
         self.agent_id = agent_id
         self.agent_type = agent_type
         self.connection_details = connection_details
@@ -114,11 +123,35 @@ class VoiceAgent:
         # Initialize services
         self.llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         self.stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"), audio_passthrough=True)
-        self.tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-            push_silence_after_stop=True,
+        
+        # Determine ElevenLabs voice_id based on language and accent
+        selected_voice_id = DEFAULT_ELEVENLABS_VOICE_ID
+        if language and accent:
+            # Validate if the language and accent are supported (optional, but good practice)
+            if language in SUPPORTED_LANGUAGES_ACCENTS and accent in SUPPORTED_LANGUAGES_ACCENTS.get(language, []):
+                selected_voice_id = ELEVENLABS_VOICE_MAPPING.get((language, accent), DEFAULT_ELEVENLABS_VOICE_ID)
+                logger.info(f"Using ElevenLabs voice_id: {selected_voice_id} for language '{language}' and accent '{accent}'")
+            else:
+                logger.warning(f"Language '{language}' or accent '{accent}' not in supported list or mapping. Using default voice_id: {DEFAULT_ELEVENLABS_VOICE_ID}")
+        else:
+            logger.info(f"Language or accent not provided. Using default ElevenLabs voice_id: {DEFAULT_ELEVENLABS_VOICE_ID}")
+
+        # self.tts = CartesiaTTSService(
+        #     api_key=os.getenv("CARTESIA_API_KEY"),
+        #     voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        #     push_silence_after_stop=True,
+        # )
+        self.tts = ElevenLabsTTSService(
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=selected_voice_id, # Use the dynamically selected voice_id
+            voice_settings={ # Default settings, can be customized if needed per voice
+                "stability": 0.5,
+                "similarity_boost": 0.5,
+                "style": 0.5,
+                "use_speaker_boost": True
+            }
         )
+        
         
         self.llm.register_function("call_end", self.end_call)
 

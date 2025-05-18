@@ -10,13 +10,14 @@ from datetime import datetime, timedelta
 from config import settings
 import json
 from pathlib import Path as PathLib
+from fastapi.responses import FileResponse
 
 # Suppress the bcrypt warning
 import warnings
 warnings.filterwarnings("ignore", message=".*error reading bcrypt version.*")
 
 from sqlalchemy.orm import Session
-from database import AgentDB, TestCaseDB, TestRunDB, get_db, ApiKey, User as DBUser, MetricDB
+from database import AgentDB, TestCaseDB, TestRunDB, get_db, ApiKey, User as DBUser, MetricDB, EvaluationDB
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
@@ -24,6 +25,7 @@ from jose import JWTError, jwt
 from voxhog import VoiceTestRunner, TestCase, UserPersona, Scenario, VoiceAgent
 from voxhog.voice_agent import Direction
 from voxhog.voice_agent_evaluation import VoiceAgentEvaluator, VoiceAgentMetric
+from transcriber import Transcriber
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -39,6 +41,10 @@ app = FastAPI(
 # Create reports directory if it doesn't exist
 reports_dir = os.path.join(os.path.dirname(__file__), "reports")
 os.makedirs(reports_dir, exist_ok=True)
+
+# Create recordings directory if it doesn't exist
+recordings_dir = os.path.join(os.path.dirname(__file__), "recordings")
+os.makedirs(recordings_dir, exist_ok=True)
 
 # Configure CORS
 app.add_middleware(
@@ -57,6 +63,7 @@ agents = {}
 test_cases = {}
 test_runs = {}
 metrics = {}
+evaluations: Dict[str, Dict[str, Any]] = {}
 users = {"admin": {"username": "admin", "password": "password"}}  # Replace with proper auth
 api_keys = {}
 
@@ -84,6 +91,8 @@ class VoiceAgentBase(BaseModel):
     agent_type: str
     connection_details: Dict[str, Any]
     direction: str
+    language: Optional[str] = None
+    accent: Optional[str] = None
 
 class VoiceAgentCreate(VoiceAgentBase):
     pass
@@ -127,6 +136,8 @@ class TestRunBase(BaseModel):
     test_case_ids: List[str]
     time_limit: Optional[int] = 60
     outbound_call_params: Optional[Dict[str, Any]] = None
+    language: Optional[str] = Field(None, description="Desired language for TTS")
+    accent: Optional[str] = Field(None, description="Desired accent for TTS")
 
 class TestRunCreate(TestRunBase):
     pass
@@ -154,6 +165,36 @@ class ApiKeyResponse(ApiKeyBase):
 class ApiKeyFullResponse(ApiKeyBase):
     id: str
     created_at: datetime
+
+# Evaluation Schemas
+class EvaluationBase(BaseModel):
+    metric_ids: List[str]
+
+class EvaluationCreate(EvaluationBase):
+    # For now, no additional fields beyond base for creation via form
+    # The file itself will be handled as UploadFile in the endpoint
+    pass
+
+class EvaluationUpdate(BaseModel):
+    status: Optional[str] = None
+    transcript: Optional[str] = None
+    results: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+    completed_at: Optional[datetime] = None
+
+class EvaluationResponse(EvaluationBase):
+    id: str
+    user_id: str # Assuming user_id should be part of the response
+    recording_filename: str
+    status: str
+    transcript: Optional[str] = None
+    results: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
 
 # Authentication endpoints
 @app.post("/token", response_model=Token)
@@ -216,26 +257,26 @@ async def create_agent(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    agent_id = str(uuid.uuid4())
-    agent_data = agent.dict()
-    agent_data["id"] = agent_id
-    agent_data["created_at"] = datetime.now()
-    
+    agent_id_uuid = str(uuid.uuid4())
     # Save to database
     db_agent = AgentDB(
-        id=agent_id,
+        id=agent_id_uuid,
         agent_id=agent.agent_id,
         agent_type=agent.agent_type,
         connection_details=agent.connection_details,
         direction=agent.direction,
+        language=agent.language,
+        accent=agent.accent,
         user_id=current_user["id"],
-        created_at=agent_data["created_at"]
+        created_at=datetime.now() 
     )
     db.add(db_agent)
     db.commit()
+    db.refresh(db_agent)
     
-    # Save to in-memory dictionary
-    agents[agent_id] = agent_data
+    # Save to in-memory dictionary (ensure all fields, including new ones, are present)
+    agent_data = db_agent.to_dict() # Use to_dict to ensure consistency
+    agents[agent_id_uuid] = agent_data
     
     return agent_data
 
@@ -256,34 +297,45 @@ async def update_agent(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Check if agent exists in memory
-    if agent_id not in agents:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
     # Check if agent exists in database
     db_agent = db.query(AgentDB).filter(AgentDB.id == agent_id).first()
     if not db_agent:
         raise HTTPException(status_code=404, detail="Agent not found in database")
     
+    # Check ownership
+    if db_agent.user_id != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to update this agent")
+
     # Update database record
     db_agent.agent_id = agent.agent_id
     db_agent.agent_type = agent.agent_type
     db_agent.connection_details = agent.connection_details
     db_agent.direction = agent.direction
+    db_agent.language = agent.language
+    db_agent.accent = agent.accent
+    # Preserve persona and scenario if they exist and are not in agent model
+    if hasattr(agent, 'persona') and agent.persona is not None:
+        db_agent.persona = agent.persona
+    if hasattr(agent, 'scenario') and agent.scenario is not None:
+        db_agent.scenario = agent.scenario
+
     db.commit()
+    db.refresh(db_agent)
     
-    # Update in-memory dictionary
-    agent_data = agent.dict()
-    agent_data["id"] = agent_id
-    agent_data["created_at"] = agents[agent_id]["created_at"]
-    # Preserve persona and scenario if they exist
-    if "persona" in agents[agent_id]:
-        agent_data["persona"] = agents[agent_id]["persona"]
-    if "scenario" in agents[agent_id]:
-        agent_data["scenario"] = agents[agent_id]["scenario"]
-    agents[agent_id] = agent_data
+    # Update in-memory dictionary (ensure all fields are present)
+    updated_agent_data = db_agent.to_dict() # Use to_dict for consistency
+
+    # Preserve persona and scenario in memory if not part of VoiceAgentCreate schema directly but were set by set_agent_persona
+    # However, db_agent.to_dict() should now include persona and scenario from DB if they were set.
+    # If VoiceAgentCreate might not include them, we ensure they are not lost from memory if previously set.
+    if "persona" in agents.get(agent_id, {}) and updated_agent_data.get("persona") is None:
+        updated_agent_data["persona"] = agents[agent_id]["persona"]
+    if "scenario" in agents.get(agent_id, {}) and updated_agent_data.get("scenario") is None:
+        updated_agent_data["scenario"] = agents[agent_id]["scenario"]
+
+    agents[agent_id] = updated_agent_data
     
-    return agent_data
+    return updated_agent_data
 
 @app.delete("/api/v1/agents/{agent_id}", status_code=204)
 async def delete_agent(
@@ -509,7 +561,7 @@ async def list_metrics(current_user: User = Depends(get_current_user), db: Sessi
     return metrics_list
 
 # Test run endpoints
-async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_limit: int):
+async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_limit: int, language: Optional[str] = None, accent: Optional[str] = None):
     try:
         # Get database session
         db = next(get_db())
@@ -521,37 +573,50 @@ async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_li
             return
         
         # Update status to running in both memory and database
-        test_runs[run_id]["status"] = "running"
+        # Ensure test_runs[run_id] exists before trying to update it
+        if run_id in test_runs:
+            test_runs[run_id]["status"] = "running"
+        else:
+            # This case should ideally not happen if create_test_run populated it
+            logger.warning(f"Test run {run_id} not found in in-memory store at start of run_test. Relying on DB.")
+
         db_test_run.status = "running"
         db.commit()
         
-        # Get agent configuration
-        agent_config = agents.get(agent_id)
-        if not agent_config:
-            test_runs[run_id]["status"] = "failed"
-            test_runs[run_id]["error"] = "Agent not found"
-            
-            # Update database
+        # Get agent configuration from DB to ensure we have latest, including language/accent
+        db_agent_config = db.query(AgentDB).filter(AgentDB.id == agent_id).first()
+        if not db_agent_config:
+            if run_id in test_runs:
+                test_runs[run_id]["status"] = "failed"
+                test_runs[run_id]["error"] = "Agent not found"
             db_test_run.status = "failed"
             db_test_run.error = "Agent not found"
             db_test_run.completed_at = datetime.now()
             db.commit()
             return
         
+        agent_config_dict = db_agent_config.to_dict() # Use the AgentDB.to_dict() which includes lang/accent
+
+        # Determine language and accent: use per-run if provided, else agent default
+        effective_language = language if language is not None else agent_config_dict.get("language")
+        effective_accent = accent if accent is not None else agent_config_dict.get("accent")
+
         # Create VoiceAgent instance
         agent = VoiceAgent(
-            agent_id=agent_config["agent_id"],
-            agent_type=agent_config["agent_type"],
-            connection_details=agent_config["connection_details"],
-            direction=Direction.INBOUND if agent_config["direction"] == "INBOUND" else Direction.OUTBOUND,
-            voice_agent_api_args=db_test_run.outbound_call_params if agent_config["direction"] == "OUTBOUND" else None
+            agent_id=agent_config_dict["agent_id"],
+            agent_type=agent_config_dict["agent_type"],
+            connection_details=agent_config_dict["connection_details"],
+            direction=Direction.INBOUND if agent_config_dict["direction"] == "INBOUND" else Direction.OUTBOUND,
+            voice_agent_api_args=db_test_run.outbound_call_params if agent_config_dict["direction"] == "OUTBOUND" else None,
+            language=effective_language, # Use effective language
+            accent=effective_accent      # Use effective accent
         )
         
-        # Set persona if available
-        if "persona" in agent_config and "scenario" in agent_config:
+        # Set persona if available in the agent_config_dict
+        if agent_config_dict.get("persona") and agent_config_dict.get("scenario"):
             agent.set_persona_and_scenario(
-                persona=agent_config["persona"],
-                scenario=agent_config["scenario"]
+                persona=agent_config_dict["persona"],
+                scenario=agent_config_dict["scenario"]
             )
         
         # Filter out any None or empty values from test_case_ids
@@ -669,6 +734,99 @@ async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_li
         except Exception as db_error:
             logger.error(f"Error updating database after test failure: {str(db_error)}")
 
+async def run_evaluation(eval_id: str):
+    logger.info(f"Starting evaluation for eval_id: {eval_id}")
+    db: Session = next(get_db())
+    
+    try:
+        db_eval = db.query(EvaluationDB).filter(EvaluationDB.id == eval_id).first()
+        if not db_eval:
+            logger.error(f"Evaluation {eval_id} not found in database.")
+            return
+
+        # Update status to running
+        db_eval.status = "running"
+        db.commit()
+        logger.info(f"Evaluation {eval_id} status updated to 'running'.")
+
+        recording_path = os.path.join("recordings", db_eval.recording_filename)
+        logger.info(f"Recording path for {eval_id}: {recording_path}")
+
+        # --- Transcription Step ---
+        transcript_text: Optional[str] = None
+        try:
+            transcriber_instance = Transcriber()
+            transcript_text = await transcriber_instance.transcribe(recording_path)
+            logger.info(f"Transcription completed for {eval_id}. Transcript length: {len(transcript_text)}")
+            db_eval.transcript = transcript_text
+        except FileNotFoundError:
+            logger.error(f"Recording file not found for {eval_id} at {recording_path}. Marking as failed.")
+            db_eval.status = "failed"
+            db_eval.error_message = f"Recording file not found: {recording_path}"
+            db_eval.completed_at = datetime.utcnow()
+            db.commit()
+            return
+        except Exception as transcription_error:
+            logger.error(f"Transcription failed for {eval_id}: {str(transcription_error)}")
+            db_eval.status = "failed"
+            db_eval.error_message = f"Transcription failed: {str(transcription_error)}"
+            db_eval.completed_at = datetime.utcnow()
+            db.commit()
+            return
+        # --- End Transcription Step ---
+
+        evaluator = VoiceAgentEvaluator(model="gpt-4o-mini") # As per plan
+        
+        # Fetch metric definitions and add to evaluator
+        if db_eval.metric_ids:
+            for metric_id in db_eval.metric_ids:
+                # Try fetching from in-memory metrics dictionary first
+                metric_config = metrics.get(metric_id)
+                if not metric_config:
+                    # Fallback to DB if not in memory (should ideally be loaded)
+                    db_metric = db.query(MetricDB).filter(MetricDB.id == metric_id).first()
+                    if db_metric:
+                        metric_config = db_metric.to_dict()
+                    else:
+                        logger.warning(f"Metric ID {metric_id} not found for evaluation {eval_id}. Skipping.")
+                        continue
+                
+                evaluator.add_metric(VoiceAgentMetric(name=metric_config["name"], prompt=metric_config["prompt"]))
+            logger.info(f"Added {len(evaluator.metrics)} metrics to evaluator for {eval_id}.")
+        else:
+            logger.info(f"No metrics specified for evaluation {eval_id}.")
+
+        evaluation_results_obj = None
+        if evaluator.metrics and transcript_text: # Only evaluate if there are metrics and a transcript
+            logger.info(f"Starting LLM-based evaluation for {eval_id}...")
+            # Current VoiceAgentEvaluator.evaluate_voice_conversation expects a dict.
+            # We will pass the transcript as part of this dict.
+            conversation_data = {"transcript": transcript_text}
+            evaluation_results_obj = await evaluator.evaluate_voice_conversation(conversation_data)
+            db_eval.results = evaluation_results_obj.dict() if evaluation_results_obj else None
+            logger.info(f"LLM-based evaluation completed for {eval_id}.")
+        elif not transcript_text:
+             logger.warning(f"Skipping LLM-based evaluation for {eval_id} as transcript is missing.")
+        else: # No metrics
+            logger.info(f"Skipping LLM-based evaluation for {eval_id} as no metrics were loaded/specified.")
+
+
+        db_eval.status = "completed"
+        db_eval.completed_at = datetime.utcnow()
+        logger.info(f"Evaluation {eval_id} completed successfully.")
+
+    except Exception as e:
+        logger.error(f"Error during evaluation {eval_id}: {str(e)}", exc_info=True)
+        if db_eval: # db_eval might not be set if the first query fails
+            db_eval.status = "failed"
+            db_eval.error_message = str(e)
+            db_eval.completed_at = datetime.utcnow()
+    finally:
+        if db_eval: # Ensure commit if db_eval was fetched
+            db.commit()
+        db.close()
+        logger.info(f"DB session closed for evaluation {eval_id}.")
+
 @app.post("/api/v1/test-runs", response_model=TestRunResponse)
 async def create_test_run(
     test_run: TestRunCreate, 
@@ -728,7 +886,9 @@ async def create_test_run(
         run_id=run_id, 
         agent_id=test_run.agent_id, 
         test_case_ids=valid_test_case_ids,
-        time_limit=test_run.time_limit or 60
+        time_limit=test_run.time_limit or 60,
+        language=test_run.language,
+        accent=test_run.accent
     )
     
     return db_test_run.to_dict()
@@ -1091,18 +1251,8 @@ async def load_data_from_db():
     
     # Load agents
     db_agents = db.query(AgentDB).all()
-    for agent in db_agents:
-        agent_dict = agent.to_dict()
-        agents[agent.id] = {
-            "id": agent.id,
-            "agent_id": agent.agent_id,
-            "agent_type": agent.agent_type,
-            "connection_details": agent.connection_details,
-            "direction": agent.direction,
-            "persona": agent.persona,
-            "scenario": agent.scenario,
-            "created_at": agent.created_at
-        }
+    for agent_db_obj in db_agents: # Renamed to avoid conflict with outer agents dict
+        agents[agent_db_obj.id] = agent_db_obj.to_dict() # This will now include lang/accent
     logger.info(f"Loaded {len(agents)} agents from database")
     
     # Load test cases
@@ -1129,6 +1279,27 @@ async def load_data_from_db():
             "created_at": metric.created_at
         }
     logger.info(f"Loaded {len(metrics)} metrics from database")
+    
+    # Load evaluations
+    db_evaluations = db.query(EvaluationDB).all()
+    for evaluation in db_evaluations:
+        # Assuming EvaluationDB has a to_dict() method or we manually construct the dict
+        # Based on EvaluationResponse, the in-memory store might want to hold similar fields.
+        # For simplicity, let's store what's directly available and useful for quick status checks/listings.
+        eval_dict = {
+            "id": evaluation.id,
+            "user_id": evaluation.user_id,
+            "recording_filename": evaluation.recording_filename,
+            "metric_ids": evaluation.metric_ids,
+            "status": evaluation.status,
+            "transcript": evaluation.transcript,
+            "results": evaluation.results, # This could be large, consider if needed in mem for all
+            "error_message": evaluation.error_message,
+            "created_at": evaluation.created_at,
+            "completed_at": evaluation.completed_at
+        }
+        evaluations[evaluation.id] = eval_dict
+    logger.info(f"Loaded {len(evaluations)} evaluations from database")
     
     db.close()
     logger.info("Data loading complete")
@@ -1316,6 +1487,89 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
 
 # Add this with your other initializations (before using it)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Evaluation Endpoints (Placeholder for POST, then GET list, then GET detail)
+
+@app.get("/api/v1/evaluations", response_model=List[EvaluationResponse])
+async def list_evaluations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieve a list of all evaluations for the current user.
+    """
+    logger.info(f"User {current_user['username']} (ID: {current_user['id']}) fetching their evaluations.")
+    evaluations_db = db.query(EvaluationDB).filter(EvaluationDB.user_id == current_user["id"]).all()
+    
+    # The response_model will handle the conversion of each EvaluationDB object
+    # to an EvaluationResponse object, thanks to orm_mode = True.
+    return evaluations_db
+
+@app.get("/api/v1/evaluations/{eval_id}", response_model=EvaluationResponse)
+async def get_evaluation_detail(
+    eval_id: str = Path(..., title="Evaluation ID", description="The ID of the evaluation to retrieve."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieve details for a specific evaluation.
+    """
+    logger.info(f"User {current_user['username']} fetching details for evaluation_id: {eval_id}")
+    db_eval = db.query(EvaluationDB).filter(EvaluationDB.id == eval_id).first()
+
+    if not db_eval:
+        logger.warning(f"Evaluation {eval_id} not found in database.")
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+
+    if db_eval.user_id != current_user["id"]:
+        logger.warning(f"User {current_user['username']} (ID: {current_user['id']}) attempted to access unauthorized evaluation {eval_id} owned by user {db_eval.user_id}.")
+        # As per OBSERVABILITY.md, return 404 if not found or unauthorized to avoid leaking info
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+
+    return db_eval
+
+@app.get("/api/v1/evaluations/{eval_id}/download")
+async def download_evaluation_recording(
+    eval_id: str = Path(..., title="Evaluation ID", description="The ID of the evaluation whose recording is to be downloaded."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Download the audio recording for a specific evaluation.
+    """
+    logger.info(f"User {current_user['username']} attempting to download recording for evaluation_id: {eval_id}")
+    db_eval = db.query(EvaluationDB).filter(EvaluationDB.id == eval_id).first()
+
+    if not db_eval:
+        logger.warning(f"Evaluation {eval_id} not found for recording download attempt.")
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+
+    if db_eval.user_id != current_user["id"]:
+        logger.warning(f"User {current_user['username']} (ID: {current_user['id']}) attempted to download recording for unauthorized evaluation {eval_id}.")
+        raise HTTPException(status_code=404, detail="Evaluation not found") # Or 403, but 404 as per plan
+
+    if not db_eval.recording_filename:
+        logger.error(f"Evaluation {eval_id} does not have an associated recording filename.")
+        raise HTTPException(status_code=404, detail="Recording file not available for this evaluation")
+
+    recording_path = os.path.join(recordings_dir, db_eval.recording_filename) # Use recordings_dir global
+    logger.info(f"Constructed recording path for download: {recording_path}")
+
+    if not os.path.exists(recording_path):
+        logger.error(f"Recording file not found at path: {recording_path} for evaluation {eval_id}")
+        raise HTTPException(status_code=404, detail="Recording file not found on server")
+
+    # Determine a media type if possible, otherwise default to application/octet-stream
+    # For simplicity, let's use a generic one, or try to infer.
+    # Example: file_extension = os.path.splitext(db_eval.recording_filename)[1].lower()
+    # media_type = "audio/wav" if file_extension == ".wav" else "audio/mpeg" if file_extension == ".mp3" else "application/octet-stream"
+    media_type = "application/octet-stream" # Safest default for download
+
+    return FileResponse(
+        path=recording_path, 
+        media_type=media_type, 
+        filename=db_eval.recording_filename
+    )
 
 if __name__ == "__main__":
     import uvicorn
