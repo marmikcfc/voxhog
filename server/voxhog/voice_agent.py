@@ -25,6 +25,10 @@ from openai.types.chat import ChatCompletionToolParam
 from dataclasses import dataclass
 from typing import Literal, Optional, Dict
 from openai.types.chat import ChatCompletionToolParam
+import datetime
+import io
+import wave
+import aiofiles
 
 # Import config values
 from config import SUPPORTED_LANGUAGES_ACCENTS, ELEVENLABS_VOICE_MAPPING, DEFAULT_ELEVENLABS_VOICE_ID
@@ -69,7 +73,8 @@ class TranscriptHandler:
 class VoiceAgent:
     def __init__(self, agent_id: str, agent_type: str, connection_details: dict, 
                  direction: Direction = None, voice_agent_api_args: dict = None,
-                 language: Optional[str] = None, accent: Optional[str] = None):
+                 language: Optional[str] = None, accent: Optional[str] = None,
+                 audio_file_name: Optional[str] = None):
         """
         Initialize a voice agent for testing.
         
@@ -84,6 +89,7 @@ class VoiceAgent:
             voice_agent_api_args (dict): Arguments for voice agent API.
             language (Optional[str]): Desired language for TTS.
             accent (Optional[str]): Desired accent for TTS.
+            audio_file_name (Optional[str]): Desired filename for the saved audio.
         """
         logger.info(f"Initializing VoiceAgent with ID: {agent_id}, Language: {language}, Accent: {accent}")
         self.agent_id = agent_id
@@ -97,6 +103,7 @@ class VoiceAgent:
         self.twilio_client = None
         self.call_sid = None
         self.voice_agent_api_kwargs = voice_agent_api_args
+        self.audio_file_name = audio_file_name
         
         # Validate connection details for phone type agents
         if self.agent_type == "phone" and direction == Direction.INBOUND:
@@ -124,7 +131,7 @@ class VoiceAgent:
         self.llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         self.stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"), audio_passthrough=True)
         
-        # Determine ElevenLabs voice_id based on language and accent
+        # # Determine ElevenLabs voice_id based on language and accent
         selected_voice_id = DEFAULT_ELEVENLABS_VOICE_ID
         if language and accent:
             # Validate if the language and accent are supported (optional, but good practice)
@@ -141,6 +148,7 @@ class VoiceAgent:
         #     voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         #     push_silence_after_stop=True,
         # )
+
         self.tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY"),
             voice_id=selected_voice_id, # Use the dynamically selected voice_id
@@ -148,8 +156,11 @@ class VoiceAgent:
                 "stability": 0.5,
                 "similarity_boost": 0.5,
                 "style": 0.5,
-                "use_speaker_boost": True
-            }
+                "auto_mode": True,
+                "optimize_streaming_latency": "2"
+            },
+            model="eleven_flash_v2_5",
+            sample_rate=16000,
         )
         
         
@@ -215,7 +226,7 @@ class VoiceAgent:
 
         context_aggregator = self.llm.create_context_aggregator(context)
 
-        audiobuffer = AudioBufferProcessor(user_continuous_stream=False)
+        audiobuffer = AudioBufferProcessor(sample_rate=44100, num_channels=2, buffer_size=0)
 
         pipeline = Pipeline([
             transport.input(),
@@ -241,6 +252,40 @@ class VoiceAgent:
                 enable_usage_metrics=True
             ),
         )
+
+        async def save_audio(audio: bytes, sample_rate: int, num_channels: int):
+            if len(audio) > 0:
+                if self.audio_file_name:
+                    if not self.audio_file_name.lower().endswith(".wav"):
+                        base_filename = f"{self.audio_file_name}.wav"
+                    else:
+                        base_filename = self.audio_file_name
+                else:
+                    base_filename = f"conversation_recording_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+                
+                # Ensure the recordings directory exists
+                recordings_dir = "recordings"
+                os.makedirs(recordings_dir, exist_ok=True)
+                
+                filename = os.path.join(recordings_dir, base_filename)
+
+                with io.BytesIO() as buffer:
+                    with wave.open(buffer, "wb") as wf:
+                        wf.setsampwidth(2)
+                        wf.setnchannels(num_channels)
+                        wf.setframerate(sample_rate)
+                        wf.writeframes(audio)
+                        
+                    async with aiofiles.open(filename, "wb") as file:
+                        await file.write(buffer.getvalue())
+                logger.info(f"Merged audio saved to {filename}")
+                print(f"Merged audio saved to {filename}")
+
+        # Handle the recorded audio chunks
+        @audiobuffer.event_handler("on_audio_data")
+        async def on_audio_data(buffer, audio, sample_rate, num_channels):
+            await save_audio(audio, sample_rate, num_channels)
+
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):

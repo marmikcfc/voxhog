@@ -26,6 +26,7 @@ async def main():
             "phone_number": os.getenv("AGENT_PHONE_NUMBER")
         },
         direction=Direction.INBOUND,
+        audio_file_name="test_audio",
 
         voice_agent_api_args = {
                 'assistantId': os.getenv("TESTING_ASSISTANT_ID"),

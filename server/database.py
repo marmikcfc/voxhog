@@ -67,8 +67,6 @@ class AgentDB(Base):
     direction = Column(String)
     persona = Column(Text, nullable=True)
     scenario = Column(Text, nullable=True)
-    language = Column(String, nullable=True)
-    accent = Column(String, nullable=True)
     user_id = Column(String, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.now)
     
@@ -85,8 +83,6 @@ class AgentDB(Base):
             "direction": self.direction,
             "persona": self.persona,
             "scenario": self.scenario,
-            "language": self.language,
-            "accent": self.accent,
             "user_id": self.user_id,
             "created_at": self.created_at
         }

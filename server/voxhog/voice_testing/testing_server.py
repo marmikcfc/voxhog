@@ -196,6 +196,7 @@ class TestingServer:
         """
         self.app = FastAPI(title="RagaAI Voice Agent Testing Server")
         voice_router = self._create_router()
+        logger.info(f"Mounting voice_router at /")
         self.app.mount("/", voice_router)
         return self.app
 
@@ -219,3 +220,19 @@ class TestingServer:
         logger.info(f"Starting server on {host}:{port}")
         
         uvicorn.run(self.app, host=host, port=port)
+
+    def cleanup(self):
+        logger.info("TestingServer cleanup called.")
+        if self.ngrok_tunnel:
+            logger.info(f"Closing ngrok tunnel: {self.ngrok_tunnel.public_url}")
+            try:
+                ngrok.disconnect(self.ngrok_tunnel.public_url)
+                ngrok.kill()
+                logger.info("Ngrok tunnel disconnected and process killed.")
+            except Exception as e:
+                logger.error(f"Error during ngrok cleanup: {e}", exc_info=True)
+            self.ngrok_tunnel = None
+            self.base_url = None
+        else:
+            logger.info("No active ngrok tunnel to cleanup.")
+        logger.info("TestingServer cleanup finished.")

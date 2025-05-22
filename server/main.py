@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query, Path, Body
+import random
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query, Path, Body, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
@@ -91,8 +92,6 @@ class VoiceAgentBase(BaseModel):
     agent_type: str
     connection_details: Dict[str, Any]
     direction: str
-    language: Optional[str] = None
-    accent: Optional[str] = None
 
 class VoiceAgentCreate(VoiceAgentBase):
     pass
@@ -108,6 +107,8 @@ class PersonaUpdate(BaseModel):
 class UserPersonaBase(BaseModel):
     name: str
     prompt: str
+    language: Optional[str] = None
+    accent: Optional[str] = None
 
 class ScenarioBase(BaseModel):
     name: str
@@ -136,8 +137,6 @@ class TestRunBase(BaseModel):
     test_case_ids: List[str]
     time_limit: Optional[int] = 60
     outbound_call_params: Optional[Dict[str, Any]] = None
-    language: Optional[str] = Field(None, description="Desired language for TTS")
-    accent: Optional[str] = Field(None, description="Desired accent for TTS")
 
 class TestRunCreate(TestRunBase):
     pass
@@ -265,8 +264,6 @@ async def create_agent(
         agent_type=agent.agent_type,
         connection_details=agent.connection_details,
         direction=agent.direction,
-        language=agent.language,
-        accent=agent.accent,
         user_id=current_user["id"],
         created_at=datetime.now() 
     )
@@ -311,8 +308,6 @@ async def update_agent(
     db_agent.agent_type = agent.agent_type
     db_agent.connection_details = agent.connection_details
     db_agent.direction = agent.direction
-    db_agent.language = agent.language
-    db_agent.accent = agent.accent
     # Preserve persona and scenario if they exist and are not in agent model
     if hasattr(agent, 'persona') and agent.persona is not None:
         db_agent.persona = agent.persona
@@ -561,7 +556,9 @@ async def list_metrics(current_user: User = Depends(get_current_user), db: Sessi
     return metrics_list
 
 # Test run endpoints
-async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_limit: int, language: Optional[str] = None, accent: Optional[str] = None):
+async def run_test(run_id: str, agent_id_from_run: str, test_case_ids: List[str], time_limit: int):
+    logger.info(f"run_test started for run_id: {run_id} with test_case_ids: {test_case_ids}")
+    db: Optional[Session] = None
     try:
         # Get database session
         db = next(get_db())
@@ -572,167 +569,185 @@ async def run_test(run_id: str, agent_id: str, test_case_ids: List[str], time_li
             logger.error(f"Test run {run_id} not found in database")
             return
         
-        # Update status to running in both memory and database
-        # Ensure test_runs[run_id] exists before trying to update it
-        if run_id in test_runs:
-            test_runs[run_id]["status"] = "running"
-        else:
-            # This case should ideally not happen if create_test_run populated it
-            logger.warning(f"Test run {run_id} not found in in-memory store at start of run_test. Relying on DB.")
-
         db_test_run.status = "running"
         db.commit()
         
-        # Get agent configuration from DB to ensure we have latest, including language/accent
-        db_agent_config = db.query(AgentDB).filter(AgentDB.id == agent_id).first()
-        if not db_agent_config:
-            if run_id in test_runs:
-                test_runs[run_id]["status"] = "failed"
-                test_runs[run_id]["error"] = "Agent not found"
+        # Get base agent configuration from DB
+        db_agent_config_from_db = db.query(AgentDB).filter(AgentDB.id == agent_id_from_run).first()
+        if not db_agent_config_from_db:
             db_test_run.status = "failed"
             db_test_run.error = "Agent not found"
             db_test_run.completed_at = datetime.now()
             db.commit()
             return
         
-        agent_config_dict = db_agent_config.to_dict() # Use the AgentDB.to_dict() which includes lang/accent
+        agent_base_config_dict = db_agent_config_from_db.to_dict()
 
-        # Determine language and accent: use per-run if provided, else agent default
-        effective_language = language if language is not None else agent_config_dict.get("language")
-        effective_accent = accent if accent is not None else agent_config_dict.get("accent")
+        all_results_transcripts = []
+        all_results_metrics = {}
+        final_status = "completed"
+        final_error = None
 
-        # Create VoiceAgent instance
-        agent = VoiceAgent(
-            agent_id=agent_config_dict["agent_id"],
-            agent_type=agent_config_dict["agent_type"],
-            connection_details=agent_config_dict["connection_details"],
-            direction=Direction.INBOUND if agent_config_dict["direction"] == "INBOUND" else Direction.OUTBOUND,
-            voice_agent_api_args=db_test_run.outbound_call_params if agent_config_dict["direction"] == "OUTBOUND" else None,
-            language=effective_language, # Use effective language
-            accent=effective_accent      # Use effective accent
-        )
-        
-        # Set persona if available in the agent_config_dict
-        if agent_config_dict.get("persona") and agent_config_dict.get("scenario"):
-            agent.set_persona_and_scenario(
-                persona=agent_config_dict["persona"],
-                scenario=agent_config_dict["scenario"]
-            )
-        
-        # Filter out any None or empty values from test_case_ids
-        valid_test_case_ids = [test_id for test_id in test_case_ids if test_id]
-        if not valid_test_case_ids:
-            logger.error(f"No valid test case IDs found for test run {run_id}")
-            test_runs[run_id]["status"] = "failed"
-            test_runs[run_id]["error"] = "No valid test case IDs"
-            
-            # Update database
-            db_test_run.status = "failed"
-            db_test_run.error = "No valid test case IDs"
-            db_test_run.completed_at = datetime.now()
-            db.commit()
-            return
-        
-        # Create test cases
-        test_runner = VoiceTestRunner(agent=agent)
-        for test_id in valid_test_case_ids:
-            test_config = test_cases.get(test_id)
-            logger.info(f"Test config: {test_config}")
-            if not test_config:
-                logger.warning(f"Test case {test_id} not found, skipping")
-                continue
+        logger.info(f"Starting loop for test_case_ids in run_id: {run_id}. Number of test cases: {len(test_case_ids)}")
+        for test_id in test_case_ids:
+            logger.info(f"Processing test_id: {test_id} in run_id: {run_id}")
+            try:
+                # Fetch TestCaseDB for its user_persona's lang/accent and prompts
+                db_test_case = db.query(TestCaseDB).filter(TestCaseDB.id == test_id).first()
+                if not db_test_case:
+                    logger.warning(f"Test case {test_id} not found for run {run_id}, skipping.")
+                    # Potentially log this as a partial failure for the test run
+                    continue
+
+                user_persona_data = db_test_case.user_persona # This is JSON from DB
+                tc_language = user_persona_data.get("language")
+                tc_accent = user_persona_data.get("accent")
+                user_persona_name = user_persona_data.get("name", "Default Persona Name")
+                user_persona_prompt = user_persona_data.get("prompt", "")
+
+                scenario_data = db_test_case.scenario # This is JSON from DB
+                scenario_name = scenario_data.get("name", "Default Scenario Name")
+                scenario_prompt = scenario_data.get("prompt", "")
+
+                # Instantiate VoiceAgent for this specific test case's voice
+                # Agent's own persona/scenario (if set) are part of agent_base_config_dict
+                audio_file_name_for_tc = f"run_{run_id}_test_{test_id}_test_case_{random.randint(1, 1000000)}"
+                logger.info(f"Initializing VoiceAgent for test_id: {test_id} in run_id: {run_id}")
+                current_agent_for_tc = VoiceAgent(
+                    agent_id=agent_base_config_dict["agent_id"],
+                    agent_type=agent_base_config_dict["agent_type"],
+                    connection_details=agent_base_config_dict["connection_details"],
+                    direction=Direction.INBOUND if agent_base_config_dict["direction"] == "INBOUND" else Direction.OUTBOUND,
+                    voice_agent_api_args=db_test_run.outbound_call_params if agent_base_config_dict["direction"] == "OUTBOUND" else None,
+                    language=tc_language, # From TestCase's UserPersona
+                    accent=tc_accent,     # From TestCase's UserPersona
+                    audio_file_name=audio_file_name_for_tc
+                )
+                logger.info(f"VoiceAgent initialized for test_id: {test_id} in run_id: {run_id}")
                 
-            # Create user persona
-            user_persona = UserPersona(
-                name=test_config["user_persona"]["name"],
-                prompt=test_config["user_persona"]["prompt"]
-            )
-            
-            # Create scenario
-            scenario = Scenario(
-                name=test_config["scenario"]["name"],
-                prompt=test_config["scenario"]["prompt"]
-            )
-            
-            # Create evaluator if metrics specified
-            evaluator = None
-            logger.info(f"Test config evaluator_metrics: {test_config.get('evaluator_metrics')}")
-            if test_config.get("evaluator_metrics"):
-                evaluator = VoiceAgentEvaluator(model="gpt-4o-mini")
-                logger.info(f"Available metrics: {list(metrics.keys())}")
-                for metric_id in test_config["evaluator_metrics"]:
-                    logger.info(f"Looking for metric with ID: {metric_id}")
-                    if metric_id in metrics:
-                        logger.info(f"Adding metric: {metrics[metric_id]['name']}")
-                        evaluator.add_metric(VoiceAgentMetric(
-                            name=metrics[metric_id]["name"],
-                            prompt=metrics[metric_id]["prompt"]
-                        ))
-                    else:
-                        logger.warning(f"Metric with ID {metric_id} not found in metrics dictionary")
-            
-            # Create test case
-            test_case = TestCase(
-                name=test_config["name"],
-                scenario=scenario,
-                user_persona=user_persona,
-                evaluator=evaluator
-            )
-            
-            # Add test case to runner
-            test_runner.add_test_case(test_case)
-        
-        # Run tests
-        import asyncio
-        await test_runner.run_all_tests(time_limit=time_limit)
-        
-        # Prepare results
-        results = {
-            "transcript": agent.get_transcript(),
-            "metrics": test_runner.get_metrics() if hasattr(test_runner, "get_metrics") else {}
+                # Set agent's persona/scenario if defined on the agent itself
+                if agent_base_config_dict.get("persona") and agent_base_config_dict.get("scenario"):
+                    current_agent_for_tc.set_persona_and_scenario(
+                        persona=agent_base_config_dict["persona"],
+                        scenario=agent_base_config_dict["scenario"]
+                    )
+                
+                # Create UserPersona and Scenario objects for the TestCase
+                user_persona_obj = UserPersona(
+                    name=user_persona_name,
+                    prompt=user_persona_prompt
+                    # language and accent are now properties of UserPersonaBase Pydantic model,
+                    # but UserPersona class from voxhog library might not yet use them.
+                    # For now, TTS uses lang/accent passed to VoiceAgent constructor.
+                )
+                scenario_obj = Scenario(
+                    name=scenario_name,
+                    prompt=scenario_prompt
+                )
+                
+                # Create evaluator if metrics specified for the test case
+                evaluator = None
+                if db_test_case.evaluator_metrics:
+                    evaluator = VoiceAgentEvaluator(model="gpt-4o-mini") # Or from config
+                    # Load metrics from in-memory 'metrics' dict (populated at startup)
+                    for metric_id_from_tc in db_test_case.evaluator_metrics:
+                        metric_config = metrics.get(metric_id_from_tc)
+                        if metric_config:
+                            evaluator.add_metric(VoiceAgentMetric(
+                                name=metric_config["name"],
+                                prompt=metric_config["prompt"]
+                            ))
+                        else:
+                            logger.warning(f"Metric with ID {metric_id_from_tc} for test case {test_id} not found in metrics dictionary.")
+                
+                test_case_obj = TestCase(
+                    name=db_test_case.name,
+                    scenario=scenario_obj,
+                    user_persona=user_persona_obj,
+                    evaluator=evaluator
+                )
+                
+                single_test_runner = VoiceTestRunner(agent=current_agent_for_tc)
+                single_test_runner.add_test_case(test_case_obj)
+                
+                logger.info(f"Running test case {test_id} for test run {run_id} with lang=\'{tc_language}\' accent=\'{tc_accent}\'")
+                await single_test_runner.run_all_tests(time_limit=time_limit) # Runs one test
+                logger.info(f"Finished single_test_runner.run_all_tests for test_id: {test_id} in run_id: {run_id}")
+                
+                # Aggregate results for this test case
+                # The structure of results might need adjustment if VoiceTestRunner.get_metrics() is test-case specific
+                # or if get_transcript is now per test case.
+                # For now, assume get_transcript() is from the agent used for this test.
+                logger.info(f"Getting transcript for test_id: {test_id} in run_id: {run_id}")
+                tc_transcript = current_agent_for_tc.get_transcript()
+                logger.info(f"Got transcript for test_id: {test_id} in run_id: {run_id}. Length: {len(tc_transcript) if tc_transcript else 'N/A'}")
+                logger.info(f"Getting metrics for test_id: {test_id} in run_id: {run_id}")
+                tc_metrics_results = single_test_runner.get_metrics() if hasattr(single_test_runner, "get_metrics") else {}
+                logger.info(f"Got metrics for test_id: {test_id} in run_id: {run_id}. Metrics: {tc_metrics_results}")
+                tc_audio_url = f"run_{run_id}_test_{test_id}.wav" # Assuming this path structure
+                
+                all_results_transcripts.append({test_id: tc_transcript})
+                if tc_metrics_results: # Ensure metrics results are not empty
+                     all_results_metrics[test_id] = tc_metrics_results
+                # Store audio URL along with other results for this test case
+                if test_id not in all_results_metrics:
+                    all_results_metrics[test_id] = {}
+                logger.info(f"Test case {test_id} audio URL: {tc_audio_url}")
+                all_results_metrics[test_id]["audio_url"] = tc_audio_url
+
+                # Save individual report (optional, if VoiceTestRunner still supports it for single runs)
+                try:
+                    report_dir = os.path.join("reports", agent_base_config_dict["id"], run_id) # Store under agent_id/run_id
+                    os.makedirs(report_dir, exist_ok=True)
+                    # Modified to include test_id in the report filename for uniqueness
+                    report_path = os.path.join(report_dir, f"report_{test_id}.json") 
+                    logger.info(f"Attempting to save report for test_id: {test_id} in run_id: {run_id} to {report_path}")
+                    single_test_runner.save_report(report_path)
+                    logger.info(f"Test case {test_id} report saved to {report_path}")
+                except Exception as report_error:
+                    logger.error(f"Error saving test case {test_id} report: {str(report_error)}", exc_info=True)
+            except Exception as e_tc:
+                logger.error(f"Error running test case {test_id} within test run {run_id}: {str(e_tc)}", exc_info=True)
+                final_status = "failed" # If any test case fails, mark the whole run as failed
+                final_error = final_error + f" TestCase {test_id} Error: {str(e_tc)};" if final_error else f"TestCase {test_id} Error: {str(e_tc)};"
+                # Store error for this specific test case if results structure allows
+                all_results_metrics[test_id] = {"error": str(e_tc)}
+            logger.info(f"Finished processing test_id: {test_id} in run_id: {run_id}")
+            # Cleanup VoiceTestRunner after each test case to free up resources like ngrok and server port
+            if single_test_runner:
+                logger.info(f"Cleaning up VoiceTestRunner for test_id: {test_id} in run_id: {run_id}")
+                try:
+                    single_test_runner.cleanup()
+                    logger.info(f"VoiceTestRunner cleanup successful for test_id: {test_id} in run_id: {run_id}")
+                except Exception as cleanup_error:
+                    logger.error(f"Error during VoiceTestRunner cleanup for test_id: {test_id}: {cleanup_error}", exc_info=True)
+
+
+        # Prepare final aggregated results for the TestRunDB
+        final_results_payload = {
+            "transcripts_per_test_case": all_results_transcripts,
+            "metrics_per_test_case": all_results_metrics,
+            "summary": f"Processed {len(test_case_ids)} test cases."
         }
         
-        # Update test run with results in memory
-        test_runs[run_id]["status"] = "completed"
-        test_runs[run_id]["completed_at"] = datetime.now()
-        test_runs[run_id]["results"] = results
-        
-        # Update database
-        db_test_run.status = "completed"
+        db_test_run.status = final_status
         db_test_run.completed_at = datetime.now()
-        db_test_run.results = results
+        db_test_run.results = final_results_payload
+        if final_error:
+            db_test_run.error = final_error
         db.commit()
-        
-        # Save report to reports/agent_id/run_id.json
-        try:
-            import os
-            report_dir = os.path.join("reports", agent_id)
-            os.makedirs(report_dir, exist_ok=True)
-            report_path = os.path.join(report_dir, f"{run_id}.json")
-            test_runner.save_report(report_path)
-            logger.info(f"Test report saved to {report_path}")
-        except Exception as report_error:
-            logger.error(f"Error saving test report: {str(report_error)}")
+        logger.info(f"run_test completed for run_id: {run_id}. Final status: {final_status}")
         
     except Exception as e:
-        logger.error(f"Error running test: {str(e)}")
-        
-        # Update in-memory dictionary
-        test_runs[run_id]["status"] = "failed"
-        test_runs[run_id]["error"] = str(e)
-        test_runs[run_id]["completed_at"] = datetime.now()
-        
-        # Update database
-        try:
-            db = next(get_db())
-            db_test_run = db.query(TestRunDB).filter(TestRunDB.id == run_id).first()
-            if db_test_run:
-                db_test_run.status = "failed"
-                db_test_run.error = str(e)
-                db_test_run.completed_at = datetime.now()
-                db.commit()
-        except Exception as db_error:
-            logger.error(f"Error updating database after test failure: {str(db_error)}")
+        logger.error(f"Critical error in run_test {run_id}: {str(e)}", exc_info=True)
+        if db and db_test_run: # Check if db and db_test_run are available
+            db_test_run.status = "failed"
+            db_test_run.error = str(e)
+            db_test_run.completed_at = datetime.now()
+            db.commit()
+    finally:
+        if db:
+            db.close()
 
 async def run_evaluation(eval_id: str):
     logger.info(f"Starting evaluation for eval_id: {eval_id}")
@@ -884,11 +899,10 @@ async def create_test_run(
     background_tasks.add_task(
         run_test, 
         run_id=run_id, 
-        agent_id=test_run.agent_id, 
+        agent_id_from_run=test_run.agent_id, # Renamed for clarity in run_test
         test_case_ids=valid_test_case_ids,
-        time_limit=test_run.time_limit or 60,
-        language=test_run.language,
-        accent=test_run.accent
+        time_limit=test_run.time_limit or 60
+        # language and accent parameters removed from run_test call
     )
     
     return db_test_run.to_dict()
@@ -1004,6 +1018,7 @@ async def get_test_transcript(
 
 @app.get("/api/v1/test-runs/{run_id}/report")
 async def get_test_run_report(
+    request: Request,
     run_id: str = Path(...), 
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -1011,30 +1026,96 @@ async def get_test_run_report(
     # Check if test run exists and user has access
     db_test_run = db.query(TestRunDB).filter(TestRunDB.id == run_id).first()
     if not db_test_run:
-        raise HTTPException(status_code=404, detail="Test run not found")
-    
-    # Check if user has access
-    if db_test_run.user_id != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Not authorized to view this test run")
-    
-    # Check if report file exists
-    import os
-    report_path = os.path.join("reports", db_test_run.agent_id, f"{run_id}.json")
-    if not os.path.exists(report_path):
-        raise HTTPException(status_code=404, detail="Report not found")
-    
-    # Read the report file
+        raise HTTPException(status_code=404, detail="Test run not found or access denied")
+
+    if db_test_run.status != "completed":
+        logger.info(f"Test run {run_id} is not completed yet (status: {db_test_run.status}). Returning empty report.")
+        return []
+
+    report_dir_path = os.path.join(reports_dir, db_test_run.agent_id, run_id)
+    logger.info(f"Looking for reports in directory: {report_dir_path}")
+
+    if not os.path.exists(report_dir_path) or not os.path.isdir(report_dir_path):
+        logger.warning(f"Report directory not found: {report_dir_path}")
+        return []
+
+    all_report_data = []
+    base_url = str(request.base_url)
+
     try:
-        import json
-        with open(report_path, 'r') as f:
-            report_data = json.load(f)
-        # Ensure consistent format - if report_data is not an array, wrap it in an array
-        if not isinstance(report_data, list):
-            report_data = [report_data]
-        return report_data
+        report_files = [f for f in os.listdir(report_dir_path) if f.startswith("report_") and f.endswith(".json")]
+        
+        if not report_files:
+            logger.info(f"No individual report_*.json files found in {report_dir_path}. Returning empty list.")
+            return []
+
+        for report_filename in sorted(report_files):
+            individual_report_path = os.path.join(report_dir_path, report_filename)
+            logger.info(f"Reading individual report file: {individual_report_path}")
+            with open(individual_report_path, 'r') as f:
+                try:
+                    report_content_list = json.load(f)
+                    
+                    # Ensure report_content_list is a list for uniform processing
+                    if isinstance(report_content_list, dict):
+                        report_content_list = [report_content_list]
+                    elif not isinstance(report_content_list, list):
+                        logger.warning(f"Report file {individual_report_path} contains unexpected data type. Skipping.")
+                        continue
+
+                    for report_item in report_content_list:
+                        if isinstance(report_item, dict) and 'recording_url' in report_item:
+                            filename = report_item['recording_url']
+                            if filename and isinstance(filename, str) and filename != "No recording URL available":
+                                # Construct full URL. Ensure no double slashes if base_url ends with / and api path starts with /
+                                api_path = f"api/v1/test-runs/recordings/{filename}"
+                                full_url = f"{base_url.rstrip('/')}/{api_path.lstrip('/')}"
+                                report_item['recording_url'] = full_url
+                                logger.debug(f"Updated recording_url for {filename} to {full_url}")
+                            else:
+                                logger.debug(f"No valid recording filename found for an item in {report_filename}")
+                        else:
+                            logger.debug(f"Item in {report_filename} is not a dict or does not have 'recording_url'. Item: {report_item}")
+                        all_report_data.append(report_item)
+
+                except json.JSONDecodeError as json_err:
+                    logger.error(f"Error decoding JSON from {individual_report_path}: {json_err}")
+                    continue 
     except Exception as e:
-        logger.error(f"Error reading report file: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error reading report file: {str(e)}")
+        logger.error(f"Error reading report files for run {run_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error processing test run reports")
+
+    logger.info(f"Successfully retrieved {len(all_report_data)} report items for run_id: {run_id}")
+    return all_report_data
+
+# Endpoint to serve test run recordings
+@app.get("/api/v1/test-runs/recordings/{filename:path}", tags=["Test Runs"])
+async def get_test_run_recording(
+    filename: str = Path(..., description="The filename of the recording to retrieve.")
+    # current_user: User = Depends(get_current_user) # Authentication removed
+):
+    logger.info(f"Request to access recording: {filename}") # Removed by user {current_user.username}
+    
+    # Security: Basic path traversal check
+    if ".." in filename or filename.startswith("/"):
+        logger.warning(f"Potential path traversal attempt for filename: {filename}")
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    file_path = os.path.join(recordings_dir, filename)
+    
+    # Check if the file exists and is within the intended directory
+    # os.path.abspath will resolve any ".."
+    # This check helps prevent accessing files outside recordings_dir even if os.path.join creates a valid-looking path
+    if not os.path.exists(file_path) or not os.path.isfile(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(recordings_dir)):
+        logger.error(f"Recording file not found or access denied: {file_path}. Absolute path: {os.path.abspath(file_path)}. recordings_dir: {os.path.abspath(recordings_dir)}")
+        raise HTTPException(status_code=404, detail="Recording not found.")
+    
+    # TODO: Add more fine-grained access control if necessary, e.g.,
+    # check if current_user is authorized to access this specific recording
+    # based on test run ownership or other criteria.
+
+    logger.info(f"Serving recording file: {file_path}")
+    return FileResponse(path=file_path, media_type="audio/wav", filename=filename)
 
 # API Keys endpoints
 @app.post("/api/v1/keys", response_model=ApiKeyResponse)
@@ -1251,21 +1332,16 @@ async def load_data_from_db():
     
     # Load agents
     db_agents = db.query(AgentDB).all()
-    for agent_db_obj in db_agents: # Renamed to avoid conflict with outer agents dict
-        agents[agent_db_obj.id] = agent_db_obj.to_dict() # This will now include lang/accent
+    for agent_db_obj in db_agents: 
+        agents[agent_db_obj.id] = agent_db_obj.to_dict() # AgentDB.to_dict() is already updated
     logger.info(f"Loaded {len(agents)} agents from database")
     
     # Load test cases
     db_test_cases = db.query(TestCaseDB).all()
-    for test_case in db_test_cases:
-        test_cases[test_case.id] = {
-            "id": test_case.id,
-            "name": test_case.name,
-            "user_persona": test_case.user_persona,
-            "scenario": test_case.scenario,
-            "evaluator_metrics": test_case.evaluator_metrics,
-            "created_at": test_case.created_at
-        }
+    for test_case_db_obj in db_test_cases: # Renamed for clarity
+        # TestCaseDB.to_dict() should correctly serialize user_persona JSON
+        # which now implicitly includes language/accent.
+        test_cases[test_case_db_obj.id] = test_case_db_obj.to_dict()
     logger.info(f"Loaded {len(test_cases)} test cases from database")
     
     # Load metrics from database

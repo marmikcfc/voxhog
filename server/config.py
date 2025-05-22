@@ -61,26 +61,50 @@ SUPPORTED_LANGUAGES_ACCENTS: Dict[str, List[str]] = {
 
 # Mapping for ElevenLabs voice IDs
 # IMPORTANT: Replace these with actual valid ElevenLabs voice IDs for your account and desired voices.
+# ELEVENLABS_VOICE_MAPPING: Dict[Tuple[str, str], str] = {
+#     # English
+#     ("English", "American"): "uYXf8XasLslADfZ2MB4u", # e.g., a typical American voice
+#     ("English", "British"): "G17SuINrv2H9FC6nvetn", # Existing "Female" - verify accent, maybe Rachel from EL
+#     ("English", "Indian"): "pzxut4zZz4GImZNlqQ3H",   # e.g., a voice with an Indian English accent
+
+#     # Hindi - Note: ElevenLabs has multilingual models. You might need to use a specific model that supports Hindi
+#     # and then select a voice ID that speaks Hindi with the desired accent.
+#     # The voice IDs below are placeholders.
+#     ("Hindi", "Standard"): "m5qndnI7u4OAdXhH0Mr5",
+#     ("Hindi", "Bihari"): "3Th96YoTP1kEKxJroYo1",
+#     ("Hindi", "Bhojpuri"): "7NsaqHdLuKNFvEfjpUno",
+#     ("Hindi", "Haryanvi"): "v984ziaDjt5EKuv3UFRU",
+
+#     # Filipino Languages - Similar to Hindi, check ElevenLabs model and voice capabilities.
+#     # These might require specific voice IDs from a multilingual model that supports these languages/accents.
+#     ("Filipino", "Standard"): "7tWz9X5zl45gE6bg2uiN", # (e.g. Tagalog)
+#     ("Filipino", "Ilocano"): "210zNy7juwIO3DylDyJk",
+#     ("Filipino", "Cebuano"): "RKj1DIXprh8zdvjllfhJ",
+# }
+
+
 ELEVENLABS_VOICE_MAPPING: Dict[Tuple[str, str], str] = {
     # English
-    ("English", "American"): "uYXf8XasLslADfZ2MB4u", # e.g., a typical American voice
-    ("English", "British"): "G17SuINrv2H9FC6nvetn", # Existing "Female" - verify accent, maybe Rachel from EL
-    ("English", "Indian"): "pzxut4zZz4GImZNlqQ3H",   # e.g., a voice with an Indian English accent
+    ("English", "American"): "zrHiDhphv9ZnVXBqCLjz", # e.g., a typical American voice
+    ("English", "British"): "zrHiDhphv9ZnVXBqCLjz", # Existing "Female" - verify accent, maybe Rachel from EL
+    ("English", "Indian"): "zrHiDhphv9ZnVXBqCLjz",   # e.g., a voice with an Indian English accent
 
     # Hindi - Note: ElevenLabs has multilingual models. You might need to use a specific model that supports Hindi
     # and then select a voice ID that speaks Hindi with the desired accent.
     # The voice IDs below are placeholders.
-    ("Hindi", "Standard"): "m5qndnI7u4OAdXhH0Mr5",
-    ("Hindi", "Bihari"): "3Th96YoTP1kEKxJroYo1",
-    ("Hindi", "Bhojpuri"): "7NsaqHdLuKNFvEfjpUno",
-    ("Hindi", "Haryanvi"): "v984ziaDjt5EKuv3UFRU",
+    ("Hindi", "Standard"): "zrHiDhphv9ZnVXBqCLjz",
+    ("Hindi", "Bihari"): "zrHiDhphv9ZnVXBqCLjz",
+    ("Hindi", "Bhojpuri"): "zrHiDhphv9ZnVXBqCLjz",
+    ("Hindi", "Haryanvi"): "zrHiDhphv9ZnVXBqCLjz",
 
     # Filipino Languages - Similar to Hindi, check ElevenLabs model and voice capabilities.
     # These might require specific voice IDs from a multilingual model that supports these languages/accents.
-    ("Filipino", "Standard"): "7tWz9X5zl45gE6bg2uiN", # (e.g. Tagalog)
-    ("Filipino", "Ilocano"): "210zNy7juwIO3DylDyJk",
-    ("Filipino", "Cebuano"): "RKj1DIXprh8zdvjllfhJ",
+    ("Filipino", "Standard"): "zrHiDhphv9ZnVXBqCLjz", # (e.g. Tagalog)
+    ("Filipino", "Ilocano"): "zrHiDhphv9ZnVXBqCLjz",
+    ("Filipino", "Cebuano"): "zrHiDhphv9ZnVXBqCLjz",
 }
 
+
+
 # Default voice if a specific mapping is not found
-DEFAULT_ELEVENLABS_VOICE_ID: str = "2zRM7PkgwBPiau2jvVXc" # Default to the existing Female voice 
+DEFAULT_ELEVENLABS_VOICE_ID: str = "zrHiDhphv9ZnVXBqCLjz" # Default to the existing Female voice 

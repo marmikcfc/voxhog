@@ -1,5 +1,6 @@
 import logging
 from typing import List, Optional, Dict
+import uuid
 import pandas as pd
 from ..voice_agent import Direction, VoiceAgent
 from .test_components import TestCase
@@ -29,6 +30,7 @@ class VoiceTestRunner:
             agent (VoiceAgent): The voice agent to test
             evaluator (VoiceAgentEvaluator): The evaluator to assess conversation quality
         """
+        logger.info(f"VoiceTestRunner __init__ called for agent: {agent.agent_id}")
         self.agent = agent
         self.test_cases: List[TestCase] = []
         self.current_test: Optional[TestCase] = None
@@ -38,26 +40,33 @@ class VoiceTestRunner:
         self.call_sid_queue = asyncio.Queue()
         self.server_loop = asyncio.new_event_loop()
         self.call_completion_futures: Dict[str, asyncio.Future] = {}
+        self.uvicorn_server_instance: Optional[uvicorn.Server] = None
         
+        logger.info("Initializing TestingServer in VoiceTestRunner.")
         self.server = TestingServer(self.agent, self.callback_queue, self.call_sid_queue)
+        logger.info("Setting up ngrok tunnel in VoiceTestRunner.")
         base_url = self.server.setup_ngrok()
         if not base_url:
             error_msg = "Failed to establish ngrok tunnel during initialization. Cannot proceed."
             logger.error(error_msg)
             raise RuntimeError(error_msg)
+        logger.info(f"Ngrok tunnel established in VoiceTestRunner: {base_url}")
             
         # Create and start the FastAPI application
+        logger.info("Creating FastAPI app in VoiceTestRunner.")
         app = self.server.create_app()
         
         # Start server in a background thread
-        logger.info("Starting server in background thread")
+        logger.info("Starting server in background thread in VoiceTestRunner.")
         self.server_thread = threading.Thread(target=self._run_server_with_consumer, args=(app,))
         self.server_thread.daemon = True  # Make thread daemon so it exits when main thread exits
         self.server_thread.start()
+        logger.info("Server thread started in VoiceTestRunner.")
         
         # Give server time to start up
-        time.sleep(4)
-        logger.info(f"Server started at {base_url}")
+        logger.info("Sleeping for 4 seconds to allow server startup in VoiceTestRunner.")
+        time.sleep(4) # Consider using a more robust check for server readiness
+        logger.info(f"Server started at {base_url} in VoiceTestRunner.")
         # Update agent connection details with server URL
         if hasattr(self.server, 'base_url'):
             self.agent.connection_details['endpoint'] = f"{self.server.base_url}/voice/ws"
@@ -100,6 +109,7 @@ class VoiceTestRunner:
             else:
                 logger.info(f"No evaluator configured for test case: {test_case.name}")
                 results["evaluator_results"] = []
+            
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -154,10 +164,12 @@ class VoiceTestRunner:
 
     async def run_test_case(self, test_case: TestCase, time_limit: int = 60) -> dict:
         """Run a single test case"""
+        logger.info(f"run_test_case started for test: {test_case.name}")
         self.current_test = test_case
         self.current_test_time_limit = time_limit
         
         try:
+            self.agent.audio_file_name = f"{uuid.uuid4()}.wav"
             # Initialize agent connection for this test case
             self.agent.initialize_connection()
             
@@ -207,6 +219,7 @@ class VoiceTestRunner:
             # Create future for this call
             self.call_completion_futures[call_sid] = asyncio.Future()
             
+            logger.info(f"Waiting for call completion for call_sid: {call_sid} in test_case: {test_case.name}")
             # Wait for call completion and evaluation data
             try:
 
@@ -219,7 +232,9 @@ class VoiceTestRunner:
                 logger.info(f"Received transcript for call {call_sid}")
                 
                 # Evaluate the test case with the complete data
+                logger.info(f"Evaluating test_case: {test_case.name} for call_sid: {call_sid}")
                 results = await self.evaluate_test_case(test_case, evaluation_data)
+                logger.info(f"Finished evaluating test_case: {test_case.name} for call_sid: {call_sid}")
                 # Add recording URL to results
                 results["recording_url"] = evaluation_data.get("recording_url", "No recording URL available")
                 self.test_evaluations[call_sid] = results
@@ -242,21 +257,31 @@ class VoiceTestRunner:
             logger.debug("Disconnecting agent")
             self.agent.disconnect()
             self.current_test = None
+            logger.info(f"run_test_case finished for test: {test_case.name}")
 
     def _run_server_with_consumer(self, app, host: str = "0.0.0.0", port: int = 8765):
         """Run the FastAPI server in a separate thread"""
+        logger.info(f"_run_server_with_consumer started. Attempting to bind to {host}:{port}")
         asyncio.set_event_loop(self.server_loop)
         
         # Schedule the consumer in this event loop
+        logger.info("Scheduling _post_callback_consumer in _run_server_with_consumer.")
         self.server_loop.create_task(self._post_callback_consumer())
         
         config = uvicorn.Config(app, host=host, port=port, log_level="info")
-        server = uvicorn.Server(config)
-        self.server_loop.run_until_complete(server.serve())
+        self.uvicorn_server_instance = uvicorn.Server(config)
+        try:
+            logger.info(f"Starting uvicorn server on {host}:{port}")
+            self.server_loop.run_until_complete(self.uvicorn_server_instance.serve())
+        except Exception as e:
+            logger.error(f"Error running uvicorn server: {e}", exc_info=True)
+            # Potentially re-raise or handle to signal failure to start
+        finally:
+            logger.info(f"Uvicorn server on {host}:{port} has shut down.")
 
     async def run_all_tests(self, time_limit: int = 20):
         """Run all test cases"""
-        logger.info(f"Starting execution of {len(self.test_cases)} test cases")
+        logger.info(f"Starting execution of {len(self.test_cases)} test cases in run_all_tests")
         
         try:
             # Run tests
@@ -265,9 +290,10 @@ class VoiceTestRunner:
                 result = await self.run_test_case(test_case, time_limit=time_limit)
                 self.results.append(result)
         finally:
-            pass
+            # Consider moving cleanup here if runner is reused or if server should stop after all its tests
+            pass # self.cleanup() # Example: if cleanup should happen after all tests for this runner
         
-        logger.info("All test cases completed")
+        logger.info("All test cases completed in run_all_tests")
 
     async def _evaluate_metric(self, metric: dict, transcript: list) -> float:
         """Evaluate a single metric using the complete transcript"""
@@ -364,10 +390,11 @@ class VoiceTestRunner:
 
     async def _post_callback_consumer(self):
         """Continuously process callback data from the callback queue and set the results for associated call SID."""
+        logger.info("_post_callback_consumer started.")
         while True:
-            logger.debug("Waiting for callback data from the callback queue")
+            logger.debug("Waiting for callback data from the callback queue in _post_callback_consumer")
             callback_data = await self.callback_queue.get()
-            logger.debug(f"Received enqueued data: {callback_data}")
+            logger.debug(f"Received enqueued data in _post_callback_consumer: {callback_data}")
             call_sid = callback_data.get('CallSid')  # Twilio uses CallSid
             if call_sid in self.call_completion_futures:
                 if not self.call_completion_futures[call_sid].done():
@@ -375,7 +402,7 @@ class VoiceTestRunner:
                     transcript = self.agent.get_transcript()
                     evaluation_data = {
                         "transcript": transcript,
-                        "recording_url": callback_data.get('RecordingUrl', 'No recording URL available')
+                        "recording_url": self.agent.audio_file_name
                     }
                     self.call_completion_futures[call_sid].set_result(evaluation_data)
                     await asyncio.sleep(0.1)  # Just a short sleep to let event loop process
@@ -384,3 +411,56 @@ class VoiceTestRunner:
                     logger.warning(f"Future already completed for call SID: {call_sid}")
             else:
                 logger.warning(f"Received callback for unknown call SID: {call_sid}") 
+
+    def cleanup(self):
+        logger.info(f"VoiceTestRunner cleanup called for agent: {self.agent.agent_id}")
+
+        # Gracefully shutdown uvicorn server first
+        if hasattr(self, 'uvicorn_server_instance') and self.uvicorn_server_instance and \
+           hasattr(self, 'server_loop') and self.server_loop.is_running():
+            logger.info("Signaling uvicorn server to shut down.")
+            # Ensure should_exit is set in the server's own event loop
+            if self.server_loop.is_running():
+                 self.server_loop.call_soon_threadsafe(setattr, self.uvicorn_server_instance, 'should_exit', True)
+            else: # Fallback if loop isn't running, though it should be if server was running
+                 self.uvicorn_server_instance.should_exit = True
+            
+            # Wait for the server thread to terminate
+            if hasattr(self, 'server_thread') and self.server_thread.is_alive():
+                logger.info("Waiting for server thread to terminate...")
+                self.server_thread.join(timeout=15) # Increased timeout for graceful shutdown
+                if self.server_thread.is_alive():
+                    logger.warning("Server thread did not terminate after signaling exit and join. Port might still be in use.")
+                else:
+                    logger.info("Server thread terminated successfully.")
+            else:
+                logger.info("Server thread was not alive or did not exist at uvicorn shutdown point.")
+        else:
+            logger.info("Uvicorn server instance not found or event loop not running; skipping uvicorn shutdown signaling.")
+        
+        # Stop the event loop if it's still running (e.g., if server.serve() exited prematurely)
+        if hasattr(self, 'server_loop') and self.server_loop.is_running():
+            logger.info("Stopping server event loop (if not already stopped by server shutdown).")
+            self.server_loop.call_soon_threadsafe(self.server_loop.stop)
+            # Give a moment for loop.stop() to be processed if server_thread didn't stop it.
+            if hasattr(self, 'server_thread') and self.server_thread.is_alive():
+                 self.server_thread.join(timeout=5) # Short additional join attempt
+                 if self.server_thread.is_alive():
+                      logger.warning("Server thread still alive after loop.stop() and additional join.")
+                 else:
+                      logger.info("Server thread terminated after loop.stop().")
+
+        if hasattr(self, 'server') and self.server:
+            logger.info("Calling TestingServer cleanup (for ngrok).")
+            self.server.cleanup() 
+            logger.info("TestingServer cleanup (for ngrok) called.")
+        
+        # Final check on server thread, already handled above but good for logging.
+        if hasattr(self, 'server_thread') and self.server_thread.is_alive():
+            logger.warning("Server thread still alive at the very end of cleanup.")
+        elif hasattr(self, 'server_thread'):
+             logger.info("Server thread confirmed terminated at the end of cleanup.")
+        else:
+            logger.info("Server thread was not alive or did not exist at the end of cleanup.")
+
+        logger.info(f"VoiceTestRunner cleanup finished for agent: {self.agent.agent_id}") 
