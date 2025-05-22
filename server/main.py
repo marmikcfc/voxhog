@@ -278,8 +278,10 @@ async def create_agent(
     return agent_data
 
 @app.get("/api/v1/agents", response_model=List[VoiceAgentResponse])
-async def list_agents(current_user: User = Depends(get_current_user)):
-    return list(agents.values())
+async def list_agents(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get user's agents from database
+    user_agents = db.query(AgentDB).filter(AgentDB.user_id == current_user['id']).all()
+    return [agent.to_dict() for agent in user_agents]
 
 @app.get("/api/v1/agents/{agent_id}", response_model=VoiceAgentResponse)
 async def get_agent(agent_id: str = Path(...), current_user: User = Depends(get_current_user)):
@@ -545,15 +547,10 @@ async def create_metric(metric: MetricBase, current_user: User = Depends(get_cur
 @app.get("/api/v1/metrics", response_model=List[MetricBase])
 async def list_metrics(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Get metrics from database
-    logger.info(f"Fetching metrics for user: {current_user['username']}")
-    db_metrics = db.query(MetricDB).all()
-    logger.info(f"Found {len(db_metrics)} metrics in database")
-    
-    # Log the metrics for debugging
-    metrics_list = [metric.to_dict() for metric in db_metrics]
-    logger.info(f"Returning metrics: {metrics_list}")
-    
-    return metrics_list
+    user_metrics = db.query(MetricDB).filter(
+        (MetricDB.user_id == current_user['id']) | (MetricDB.user_id == None)
+    ).all()
+    return [metric.to_dict() for metric in user_metrics]
 
 # Test run endpoints
 async def run_test(run_id: str, agent_id_from_run: str, test_case_ids: List[str], time_limit: int):
