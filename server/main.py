@@ -12,6 +12,7 @@ from config import settings
 import json
 from pathlib import Path as PathLib
 from fastapi.responses import FileResponse
+import time
 
 # Suppress the bcrypt warning
 import warnings
@@ -716,6 +717,7 @@ async def run_test(run_id: str, agent_id_from_run: str, test_case_ids: List[str]
                 try:
                     single_test_runner.cleanup()
                     logger.info(f"VoiceTestRunner cleanup successful for test_id: {test_id} in run_id: {run_id}")
+                    time.sleep(10) # Sleep for 10 seconds after cleanup
                 except Exception as cleanup_error:
                     logger.error(f"Error during VoiceTestRunner cleanup for test_id: {test_id}: {cleanup_error}", exc_info=True)
 
