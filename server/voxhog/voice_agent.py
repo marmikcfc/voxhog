@@ -131,38 +131,60 @@ class VoiceAgent:
         self.llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         self.stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"), audio_passthrough=True)
         
-        # # Determine ElevenLabs voice_id based on language and accent
-        selected_voice_id = DEFAULT_ELEVENLABS_VOICE_ID
-        if language and accent:
-            # Validate if the language and accent are supported (optional, but good practice)
-            if language in SUPPORTED_LANGUAGES_ACCENTS and accent in SUPPORTED_LANGUAGES_ACCENTS.get(language, []):
-                selected_voice_id = ELEVENLABS_VOICE_MAPPING.get((language, accent), DEFAULT_ELEVENLABS_VOICE_ID)
-                logger.info(f"Using ElevenLabs voice_id: {selected_voice_id} for language '{language}' and accent '{accent}'")
+        # Determine TTS provider from environment variable
+        tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").lower()
+        logger.info(f"TTS_PROVIDER set to: {tts_provider}")
+
+        if tts_provider == "cartesia":
+            logger.info("Initializing CartesiaTTSService.")
+            self.tts = CartesiaTTSService(
+                api_key=os.getenv("CARTESIA_API_KEY"),
+                voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # Example British Lady, or make this configurable
+                push_silence_after_stop=True,
+            )
+        elif tts_provider == "elevenlabs":
+            logger.info("Initializing ElevenLabsTTSService.")
+            # Determine ElevenLabs voice_id based on language and accent
+            selected_voice_id = DEFAULT_ELEVENLABS_VOICE_ID
+            if language and accent:
+                if language in SUPPORTED_LANGUAGES_ACCENTS and accent in SUPPORTED_LANGUAGES_ACCENTS.get(language, []):
+                    selected_voice_id = ELEVENLABS_VOICE_MAPPING.get((language, accent), DEFAULT_ELEVENLABS_VOICE_ID)
+                    logger.info(f"Using ElevenLabs voice_id: {selected_voice_id} for language '{language}' and accent '{accent}'")
+                else:
+                    logger.warning(f"Language '{language}' or accent '{accent}' not in supported list or mapping. Using default voice_id: {DEFAULT_ELEVENLABS_VOICE_ID}")
             else:
-                logger.warning(f"Language '{language}' or accent '{accent}' not in supported list or mapping. Using default voice_id: {DEFAULT_ELEVENLABS_VOICE_ID}")
+                logger.info(f"Language or accent not provided. Using default ElevenLabs voice_id: {DEFAULT_ELEVENLABS_VOICE_ID}")
+
+            self.tts = ElevenLabsTTSService(
+                api_key=os.getenv("ELEVENLABS_API_KEY"),
+                voice_id=selected_voice_id, 
+                voice_settings={ 
+                    "stability": 0.5,
+                    "similarity_boost": 0.5,
+                    "style": 0.5,
+                    "auto_mode": True,
+                    "optimize_streaming_latency": "2"
+                },
+                model="eleven_flash_v2_5",
+                sample_rate=16000,
+            )
         else:
-            logger.info(f"Language or accent not provided. Using default ElevenLabs voice_id: {DEFAULT_ELEVENLABS_VOICE_ID}")
-
-        # self.tts = CartesiaTTSService(
-        #     api_key=os.getenv("CARTESIA_API_KEY"),
-        #     voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-        #     push_silence_after_stop=True,
-        # )
-
-        self.tts = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=selected_voice_id, # Use the dynamically selected voice_id
-            voice_settings={ # Default settings, can be customized if needed per voice
-                "stability": 0.5,
-                "similarity_boost": 0.5,
-                "style": 0.5,
-                "auto_mode": True,
-                "optimize_streaming_latency": "2"
-            },
-            model="eleven_flash_v2_5",
-            sample_rate=16000,
-        )
-        
+            logger.error(f"Unsupported TTS_PROVIDER: {tts_provider}. Defaulting to ElevenLabs.")
+            # Fallback to ElevenLabs if provider is unknown (or handle error differently)
+            selected_voice_id = DEFAULT_ELEVENLABS_VOICE_ID # Default voice for fallback
+            self.tts = ElevenLabsTTSService(
+                api_key=os.getenv("ELEVENLABS_API_KEY"),
+                voice_id=selected_voice_id,
+                model="eleven_flash_v2_5", # Ensure model is specified
+                sample_rate=16000, # Ensure sample_rate is specified
+                voice_settings={ # Default settings for fallback
+                    "stability": 0.5,
+                    "similarity_boost": 0.5,
+                    "style": 0.5,
+                    "auto_mode": True,
+                    "optimize_streaming_latency": "2"
+                }
+            )
         
         self.llm.register_function("call_end", self.end_call)
 
