@@ -31,7 +31,7 @@ import wave
 import aiofiles
 
 # Import config values
-from config import SUPPORTED_LANGUAGES_ACCENTS, ELEVENLABS_VOICE_MAPPING, DEFAULT_ELEVENLABS_VOICE_ID
+from config import SUPPORTED_LANGUAGES_ACCENTS, ELEVENLABS_VOICE_MAPPING, DEFAULT_ELEVENLABS_VOICE_ID, CARTESIA_VOICE_MAPPING, DEFAULT_CARTESIA_VOICE_ID
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -137,9 +137,20 @@ class VoiceAgent:
 
         if tts_provider == "cartesia":
             logger.info("Initializing CartesiaTTSService.")
+            # Determine Cartesia voice_id based on language and accent
+            selected_voice_id = DEFAULT_CARTESIA_VOICE_ID
+            if language and accent:
+                if language in SUPPORTED_LANGUAGES_ACCENTS and accent in SUPPORTED_LANGUAGES_ACCENTS.get(language, []):
+                    selected_voice_id = CARTESIA_VOICE_MAPPING.get((language, accent), DEFAULT_CARTESIA_VOICE_ID)
+                    logger.info(f"Using Cartesia voice_id: {selected_voice_id} for language '{language}' and accent '{accent}'")
+                else:
+                    logger.warning(f"Language '{language}' or accent '{accent}' not in supported list or Cartesia mapping. Using default voice_id: {DEFAULT_CARTESIA_VOICE_ID}")
+            else:
+                logger.info(f"Language or accent not provided. Using default Cartesia voice_id: {DEFAULT_CARTESIA_VOICE_ID}")
+
             self.tts = CartesiaTTSService(
                 api_key=os.getenv("CARTESIA_API_KEY"),
-                voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # Example British Lady, or make this configurable
+                voice_id=selected_voice_id, # Use selected_voice_id
                 push_silence_after_stop=True,
             )
         elif tts_provider == "elevenlabs":

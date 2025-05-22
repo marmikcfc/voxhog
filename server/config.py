@@ -105,6 +105,16 @@ ELEVENLABS_VOICE_MAPPING: Dict[Tuple[str, str], str] = {
 }
 
 
+CARTESIA_VOICE_MAPPING: Dict[Tuple[str, str], str] = {
+    # English
+    ("English", "American"): "79a125e8-cd45-4c13-8a67-188112f4dd22", # e.g., a typical American voice
+    ("English", "British"): "4f7f1324-1853-48a6-b294-4e78e8036a83", # Existing "Female" - verify accent, maybe Rachel from EL
+    ("English", "Indian"): "f6141af3-5f94-418c-80ed-a45d450e7e2e",   # e.g., a voice with an Indian English accent
+
+}
+
+
+DEFAULT_CARTESIA_VOICE_ID: str = "4f7f1324-1853-48a6-b294-4e78e8036a83" # Default to the existing Female voice 
 
 # Default voice if a specific mapping is not found
 DEFAULT_ELEVENLABS_VOICE_ID: str = "zrHiDhphv9ZnVXBqCLjz" # Default to the existing Female voice 
