@@ -26,6 +26,12 @@ import { useForm } from 'react-hook-form';
 import Link from 'next/link';
 import { use } from 'react'
 
+const SUPPORTED_LANGUAGES_ACCENTS = {
+    "Hindi": ["Bihari", "Bhojpuri", "Standard", "Haryanvi"],
+    "English": ["Indian", "American", "British"],
+    "Filipino": ["Standard", "Ilocano", "Cebuano"]
+};
+
 export default function TestCaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { user, isLoading, logout, isAuthenticated } = useAuth();
     const router = useRouter();
@@ -35,18 +41,20 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
     const [metrics, setMetrics] = useState<Metric[]>([]);
     const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
     const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
+    const [selectedLanguage, setSelectedLanguage] = useState('');
+    const [availableAccents, setAvailableAccents] = useState<string[]>([]);
 
     const { id } = use(params);
     // Store the ID in a state variable to avoid direct access to params.id
     const [testCaseId, setTestCaseId] = useState<string>(id);
-
-
 
     const form = useForm({
         defaultValues: {
             name: '',
             persona_name: '',
             persona_prompt: '',
+            persona_language: '',
+            persona_accent: '',
             scenario_name: '',
             scenario_prompt: '',
         },
@@ -75,6 +83,20 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
         }
     }, [testCase, metrics]);
 
+    useEffect(() => {
+        if (selectedLanguage && SUPPORTED_LANGUAGES_ACCENTS[selectedLanguage as keyof typeof SUPPORTED_LANGUAGES_ACCENTS]) {
+            setAvailableAccents(SUPPORTED_LANGUAGES_ACCENTS[selectedLanguage as keyof typeof SUPPORTED_LANGUAGES_ACCENTS]);
+        } else {
+            setAvailableAccents([]);
+        }
+        // Only reset accent if language actually changed, and not on initial load if accent is already set
+        if (form.getValues('persona_language') === selectedLanguage && form.getValues('persona_accent')) {
+            // Do not reset if language is the same and accent is already set (e.g. on load)
+        } else {
+            form.setValue('persona_accent', '');
+        }
+    }, [selectedLanguage, form]);
+
     const fetchTestCase = async () => {
         setIsLoadingTestCase(true);
         try {
@@ -87,6 +109,15 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
             form.setValue('persona_prompt', data.user_persona.prompt);
             form.setValue('scenario_name', data.scenario.name);
             form.setValue('scenario_prompt', data.scenario.prompt);
+
+            // Set language and accent for persona
+            if (data.user_persona.language) {
+                form.setValue('persona_language', data.user_persona.language);
+                setSelectedLanguage(data.user_persona.language); // Trigger accent update
+            }
+            if (data.user_persona.accent) {
+                form.setValue('persona_accent', data.user_persona.accent);
+            }
 
             // Set selected metrics
             if (data.evaluator_metrics && data.evaluator_metrics.length > 0) {
@@ -135,6 +166,8 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
                 user_persona: {
                     name: values.persona_name,
                     prompt: values.persona_prompt,
+                    language: values.persona_language,
+                    accent: values.persona_accent,
                 },
                 scenario: {
                     name: values.scenario_name,
@@ -227,6 +260,59 @@ export default function TestCaseDetailPage({ params }: { params: Promise<{ id: s
                                                     placeholder="Enter persona prompt"
                                                     {...field}
                                                 />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+
+                                <FormField
+                                    control={form.control}
+                                    name="persona_language"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Persona Language</FormLabel>
+                                            <FormControl>
+                                                <select
+                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    {...field}
+                                                    onChange={(e) => {
+                                                        field.onChange(e);
+                                                        setSelectedLanguage(e.target.value);
+                                                    }}
+                                                >
+                                                    <option value="" disabled>Select Language</option>
+                                                    {Object.keys(SUPPORTED_LANGUAGES_ACCENTS).map((lang) => (
+                                                        <option key={lang} value={lang}>
+                                                            {lang}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+
+                                <FormField
+                                    control={form.control}
+                                    name="persona_accent"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Persona Accent</FormLabel>
+                                            <FormControl>
+                                                <select
+                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    {...field}
+                                                    disabled={!selectedLanguage || availableAccents.length === 0}
+                                                >
+                                                    <option value="" disabled>Select Accent</option>
+                                                    {availableAccents.map((accent) => (
+                                                        <option key={accent} value={accent}>
+                                                            {accent}
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>

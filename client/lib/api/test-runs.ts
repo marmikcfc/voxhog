@@ -16,8 +16,6 @@ export interface CreateTestRunData {
     test_case_ids: string[];
     time_limit?: number;
     outbound_call_params?: Record<string, any>;
-    language?: string;
-    accent?: string;
 }
 
 // API functions for test runs

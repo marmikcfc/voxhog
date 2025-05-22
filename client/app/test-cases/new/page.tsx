@@ -19,6 +19,12 @@ import { createTestCase, getMetrics, Metric } from '@/lib/api/test-cases';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
 
+const SUPPORTED_LANGUAGES_ACCENTS = {
+    "Hindi": ["Bihari", "Bhojpuri", "Standard", "Haryanvi"],
+    "English": ["Indian", "American", "British"],
+    "Filipino": ["Standard", "Ilocano", "Cebuano"]
+};
+
 export default function NewTestCasePage() {
     const { user, isLoading, logout, isAuthenticated } = useAuth();
     const router = useRouter();
@@ -26,12 +32,16 @@ export default function NewTestCasePage() {
     const [metrics, setMetrics] = useState<Metric[]>([]);
     const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
     const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
+    const [selectedLanguage, setSelectedLanguage] = useState('');
+    const [availableAccents, setAvailableAccents] = useState<string[]>([]);
 
     const form = useForm({
         defaultValues: {
             name: '',
             persona_name: '',
             persona_prompt: '',
+            persona_language: '',
+            persona_accent: '',
             scenario_name: '',
             scenario_prompt: '',
         },
@@ -48,6 +58,15 @@ export default function NewTestCasePage() {
             fetchMetrics();
         }
     }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (selectedLanguage && SUPPORTED_LANGUAGES_ACCENTS[selectedLanguage as keyof typeof SUPPORTED_LANGUAGES_ACCENTS]) {
+            setAvailableAccents(SUPPORTED_LANGUAGES_ACCENTS[selectedLanguage as keyof typeof SUPPORTED_LANGUAGES_ACCENTS]);
+        } else {
+            setAvailableAccents([]);
+        }
+        form.setValue('persona_accent', '');
+    }, [selectedLanguage, form]);
 
     const fetchMetrics = async () => {
         setIsLoadingMetrics(true);
@@ -95,6 +114,8 @@ export default function NewTestCasePage() {
                 user_persona: {
                     name: values.persona_name,
                     prompt: values.persona_prompt,
+                    language: values.persona_language,
+                    accent: values.persona_accent,
                 },
                 scenario: {
                     name: values.scenario_name,
@@ -186,6 +207,59 @@ export default function NewTestCasePage() {
                                                     placeholder="Enter persona prompt"
                                                     {...field}
                                                 />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+
+                                <FormField
+                                    control={form.control}
+                                    name="persona_language"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Persona Language</FormLabel>
+                                            <FormControl>
+                                                <select
+                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    {...field}
+                                                    onChange={(e) => {
+                                                        field.onChange(e);
+                                                        setSelectedLanguage(e.target.value);
+                                                    }}
+                                                >
+                                                    <option value="" disabled>Select Language</option>
+                                                    {Object.keys(SUPPORTED_LANGUAGES_ACCENTS).map((lang) => (
+                                                        <option key={lang} value={lang}>
+                                                            {lang}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+
+                                <FormField
+                                    control={form.control}
+                                    name="persona_accent"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Persona Accent</FormLabel>
+                                            <FormControl>
+                                                <select
+                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    {...field}
+                                                    disabled={!selectedLanguage || availableAccents.length === 0}
+                                                >
+                                                    <option value="" disabled>Select Accent</option>
+                                                    {availableAccents.map((accent) => (
+                                                        <option key={accent} value={accent}>
+                                                            {accent}
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>

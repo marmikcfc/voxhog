@@ -19,8 +19,10 @@ export default function TestRunDetailPage({ params }: { params: Promise<{ id: st
     const [isLoadingTestRun, setIsLoadingTestRun] = useState(true);
     const [agentName, setAgentName] = useState<string>('');
     const [testCaseNames, setTestCaseNames] = useState<Record<string, string>>({});
-    const [report, setReport] = useState<any>(null);
+    const [report, setReport] = useState<any[] | any>(null);
+    const [selectedTestCaseReport, setSelectedTestCaseReport] = useState<any>(null);
     const [isLoadingReport, setIsLoadingReport] = useState(false);
+    const [showDetailsView, setShowDetailsView] = useState(false);
     const [activeTab, setActiveTab] = useState('details');
 
     // Access the ID directly from params
@@ -101,6 +103,17 @@ export default function TestRunDetailPage({ params }: { params: Promise<{ id: st
             const data = await getTestRunReport(testRunId);
             console.log('Report data:', data);
             setReport(data);
+
+            if (Array.isArray(data) && data.length > 0) {
+                setSelectedTestCaseReport(null);
+                setShowDetailsView(false);
+            } else if (!Array.isArray(data) && data) {
+                setSelectedTestCaseReport(data);
+                setShowDetailsView(true);
+            } else {
+                setSelectedTestCaseReport(null);
+                setShowDetailsView(false);
+            }
         } catch (error) {
             console.error('Failed to fetch report:', error);
             toast.error('Failed to fetch report');
@@ -312,11 +325,32 @@ export default function TestRunDetailPage({ params }: { params: Promise<{ id: st
                                 <div className="flex h-40 items-center justify-center">
                                     <p>Loading report...</p>
                                 </div>
-                            ) : report ? (
-                                <div className="space-y-6">
-                                    {/* Extract the first item from the array if report is an array */}
+                            ) : !report ? (
+                                <div className="rounded-lg border border-dashed p-8 text-center">
+                                    <p className="text-gray-500">
+                                        No report available for this test run.
+                                    </p>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-2"
+                                        onClick={fetchReport}
+                                    >
+                                        Generate Report
+                                    </Button>
+                                </div>
+                            ) : showDetailsView && selectedTestCaseReport ? (
+                                <>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="mb-4"
+                                        onClick={() => setShowDetailsView(false)}
+                                    >
+                                        &larr; Back to Test Cases List
+                                    </Button>
                                     {(() => {
-                                        const reportData = Array.isArray(report) && report.length > 0 ? report[0] : report;
+                                        const reportData = selectedTestCaseReport;
                                         return (
                                             <>
                                                 <div className="grid gap-4 md:grid-cols-2">
@@ -342,7 +376,7 @@ export default function TestRunDetailPage({ params }: { params: Promise<{ id: st
                                                         <h4 className="font-medium">Recording</h4>
                                                         <div className="mt-2">
                                                             <audio controls className="w-full">
-                                                                <source src={reportData.recording_url} type="audio/mpeg" />
+                                                                <source src={reportData.recording_url} type="audio/wav" />
                                                                 Your browser does not support the audio element.
                                                             </audio>
                                                         </div>
@@ -379,7 +413,6 @@ export default function TestRunDetailPage({ params }: { params: Promise<{ id: st
                                                     <h4 className="font-medium">Transcript</h4>
                                                     <div className="mt-2 rounded-lg border p-4 max-h-[300px] overflow-y-auto">
                                                         {Array.isArray(reportData.transcript) ? (
-                                                            // Handle array format (with speaker, text, timestamp objects)
                                                             reportData.transcript.map((item: any, index: number) => (
                                                                 <div key={index} className="mb-4">
                                                                     <p className="font-medium">{item.speaker}:</p>
@@ -390,20 +423,15 @@ export default function TestRunDetailPage({ params }: { params: Promise<{ id: st
                                                                 </div>
                                                             ))
                                                         ) : typeof reportData.transcript === 'string' ? (
-                                                            // Check if the string contains "assistant:" or "user:" patterns
                                                             reportData.transcript.toLowerCase().includes('assistant:') ||
                                                                 reportData.transcript.toLowerCase().includes('user:') ? (
-                                                                // Handle string transcript with specific format
                                                                 <div>
                                                                     {reportData.transcript.split('\n').map((line: string, index: number) => {
-                                                                        // Check if line starts with "assistant:" or "user:"
                                                                         const isAssistant = line.toLowerCase().startsWith('assistant:');
                                                                         const isUser = line.toLowerCase().startsWith('user:');
-
                                                                         if (isAssistant || isUser) {
                                                                             const [speaker, ...textParts] = line.split(':');
                                                                             const text = textParts.join(':').trim();
-
                                                                             return (
                                                                                 <div key={index} className="mb-4">
                                                                                     <p className={`font-medium ${isAssistant ? 'text-blue-600' : 'text-green-600'}`}>
@@ -413,17 +441,15 @@ export default function TestRunDetailPage({ params }: { params: Promise<{ id: st
                                                                                 </div>
                                                                             );
                                                                         } else {
-                                                                            // For lines that don't start with speaker indicators
                                                                             return line.trim() ? (
                                                                                 <p key={index} className="mb-2 ml-4">{line}</p>
                                                                             ) : (
-                                                                                <div key={index} className="h-2"></div> // Empty space for blank lines
+                                                                                <div key={index} className="h-2"></div>
                                                                             );
                                                                         }
                                                                     })}
                                                                 </div>
                                                             ) : (
-                                                                // Fallback for string without expected format - just split by newlines
                                                                 <div>
                                                                     {reportData.transcript.split('\n').map((line: string, index: number) => (
                                                                         <p key={index} className="mb-2">
@@ -440,20 +466,51 @@ export default function TestRunDetailPage({ params }: { params: Promise<{ id: st
                                             </>
                                         );
                                     })()}
+                                </>
+                            ) : Array.isArray(report) && report.length > 0 ? (
+                                <div className="rounded-lg border shadow-sm overflow-hidden mb-6">
+                                    <table className="w-full">
+                                        <thead>
+                                            <tr className="border-b bg-muted/50">
+                                                <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Test Case Name</th>
+                                                <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Pass Rate</th>
+                                                <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider">Status</th>
+                                                <th className="text-right py-3 px-4 font-medium text-xs uppercase tracking-wider">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {report.map((singleReport: any, index: number) => (
+                                                <tr key={singleReport.test_name || index} className="border-b hover:bg-muted/50 transition-colors">
+                                                    <td className="py-3 px-4 text-sm">
+                                                        {singleReport.test_name || 'N/A'}
+                                                    </td>
+                                                    <td className="py-3 px-4 text-sm">
+                                                        {singleReport.pass_rate != null ? `${singleReport.pass_rate}` : 'N/A'}
+                                                    </td>
+                                                    <td className="py-3 px-4 text-sm">
+                                                        <span className={`rounded-full px-2 py-1 text-xs font-medium ${singleReport.pass_count === singleReport.total_evaluations && singleReport.total_evaluations > 0
+                                                            ? 'bg-green-100 text-green-800 dark:bg-green-800/20 dark:text-green-400'
+                                                            : (singleReport.fail_count > 0 ? 'bg-red-100 text-red-800 dark:bg-red-800/20 dark:text-red-400' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-800/20 dark:text-yellow-400')
+                                                            }`}>
+                                                            {singleReport.pass_count === singleReport.total_evaluations && singleReport.total_evaluations > 0 ? 'Passed' : (singleReport.fail_count > 0 ? 'Failed' : 'Partial/Pending')}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-4 text-sm text-right">
+                                                        <Button variant="outline" size="sm" onClick={() => {
+                                                            setSelectedTestCaseReport(singleReport);
+                                                            setShowDetailsView(true);
+                                                        }}>
+                                                            View Details
+                                                        </Button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 </div>
                             ) : (
                                 <div className="rounded-lg border border-dashed p-8 text-center">
-                                    <p className="text-gray-500">
-                                        No report available for this test run.
-                                    </p>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="mt-2"
-                                        onClick={fetchReport}
-                                    >
-                                        Generate Report
-                                    </Button>
+                                    <p className="text-gray-500">No test case reports found for this run.</p>
                                 </div>
                             )}
                         </div>

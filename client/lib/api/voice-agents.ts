@@ -8,8 +8,6 @@ export interface VoiceAgent {
     created_at: string;
     persona?: string;
     scenario?: string;
-    language?: string;
-    accent?: string;
 }
 
 export interface CreateVoiceAgentData {
@@ -17,8 +15,6 @@ export interface CreateVoiceAgentData {
     agent_type: string;
     connection_details: Record<string, any>;
     direction: string;
-    language?: string;
-    accent?: string;
 }
 
 export interface UpdatePersonaData {

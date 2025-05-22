@@ -25,12 +25,6 @@ import { useForm } from 'react-hook-form';
 import Link from 'next/link';
 import { use } from 'react';
 
-const SUPPORTED_LANGUAGES_ACCENTS = {
-    "Hindi": ["Bihari", "Bhojpuri", "Standard", "Haryanvi"],
-    "English": ["Indian", "American", "British"],
-    "Filipino": ["Standard", "Ilocano", "Cebuano"]
-};
-
 export default function VoiceAgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { user, isLoading, logout, isAuthenticated } = useAuth();
     const router = useRouter();
@@ -38,8 +32,6 @@ export default function VoiceAgentDetailPage({ params }: { params: Promise<{ id:
     const [isLoadingAgent, setIsLoadingAgent] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [activeTab, setActiveTab] = useState('details');
-    const [selectedLanguage, setSelectedLanguage] = useState('');
-    const [availableAccents, setAvailableAccents] = useState<string[]>([]);
 
     const { id } = use(params);
 
@@ -60,21 +52,11 @@ export default function VoiceAgentDetailPage({ params }: { params: Promise<{ id:
             direction: 'INBOUND',
             phone_number: '',
             endpoint: '',
-            language: '',
-            accent: '',
         },
     });
 
     // Watch the agent_type field to conditionally show/hide fields
     const agentType = detailsForm.watch('agent_type');
-
-    useEffect(() => {
-        if (selectedLanguage && SUPPORTED_LANGUAGES_ACCENTS[selectedLanguage as keyof typeof SUPPORTED_LANGUAGES_ACCENTS]) {
-            setAvailableAccents(SUPPORTED_LANGUAGES_ACCENTS[selectedLanguage as keyof typeof SUPPORTED_LANGUAGES_ACCENTS]);
-        } else {
-            setAvailableAccents([]);
-        }
-    }, [selectedLanguage]);
 
     const personaForm = useForm({
         defaultValues: {
@@ -108,13 +90,7 @@ export default function VoiceAgentDetailPage({ params }: { params: Promise<{ id:
                 direction: data.direction,
                 phone_number: data.connection_details.phone_number || '',
                 endpoint: data.connection_details.endpoint || '',
-                language: data.language || '',
-                accent: data.accent || '',
             });
-
-            if (data.language) {
-                setSelectedLanguage(data.language);
-            }
 
             // Set form values for persona
             personaForm.reset({
@@ -149,8 +125,6 @@ export default function VoiceAgentDetailPage({ params }: { params: Promise<{ id:
                 agent_type: values.agent_type,
                 direction: values.direction,
                 connection_details: connectionDetails,
-                language: values.language,
-                accent: values.accent,
             };
 
             const updatedAgent = await updateVoiceAgent(agentId, agentData);
@@ -322,61 +296,6 @@ export default function VoiceAgentDetailPage({ params }: { params: Promise<{ id:
                                         )}
                                     />
                                 )}
-
-                                <FormField
-                                    control={detailsForm.control}
-                                    name="language"
-                                    render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Language</FormLabel>
-                                            <FormControl>
-                                                <select
-                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                                                    {...field}
-                                                    onChange={(e) => {
-                                                        field.onChange(e);
-                                                        setSelectedLanguage(e.target.value);
-                                                        // Reset accent when language changes
-                                                        detailsForm.setValue('accent', '');
-                                                    }}
-                                                >
-                                                    <option value="" disabled>Select Language</option>
-                                                    {Object.keys(SUPPORTED_LANGUAGES_ACCENTS).map((lang) => (
-                                                        <option key={lang} value={lang}>
-                                                            {lang}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-
-                                <FormField
-                                    control={detailsForm.control}
-                                    name="accent"
-                                    render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Accent</FormLabel>
-                                            <FormControl>
-                                                <select
-                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                                                    {...field}
-                                                    disabled={!selectedLanguage || availableAccents.length === 0}
-                                                >
-                                                    <option value="" disabled>Select Accent</option>
-                                                    {availableAccents.map((accent) => (
-                                                        <option key={accent} value={accent}>
-                                                            {accent}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
 
                                 <Button type="submit" disabled={isSubmitting}>
                                     {isSubmitting ? 'Updating...' : 'Update Voice Agent'}

@@ -2,6 +2,8 @@
 export interface UserPersona {
     name: string;
     prompt: string;
+    language?: string;
+    accent?: string;
 }
 
 export interface Scenario {
