@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: voxhog_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - voxhog_db_data:/app/server  # Mount the named volume to where voxhog.db will be
+      - voxhog_reports_data:/app/server/reports
+      - voxhog_recordings_data:/app/server/recordings
+      # If you have a .env file in your project root, uncomment the line below
+      # env_file:
+      #   - .env
+    environment:
+      # DATABASE_URL is already set in the Dockerfile, but you can override if needed
+      # DATABASE_URL: sqlite:///./server/voxhog.db
+      SECRET_KEY: ${SECRET_KEY:-your-default-secret-key} # Example: use from .env or default
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+      # Add other environment variables your app needs
+      # VAPI_API_KEY: ${VAPI_API_KEY:-}
+      # CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
+      # DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+    working_dir: /app # Set working directory to /app where server is a sub-directory
+
+volumes:
+  voxhog_db_data:
+  voxhog_reports_data:
+  voxhog_recordings_data: 

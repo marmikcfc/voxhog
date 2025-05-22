@@ -18,7 +18,7 @@ public/dist/
 
 # Project specific
 server/reports/
-
+server/recordings/
 # Environment variables
 .env
 .env.development.local
